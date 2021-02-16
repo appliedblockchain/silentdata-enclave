@@ -1,0 +1,92 @@
+# Performs the reproducible build in the docker container
+
+set -e
+
+script_dir="$( cd "$( dirname "$0" )" >> /dev/null 2>&1 && pwd )"
+
+# Source directories
+sgx_repo="$script_dir/sgx"
+mbed_repo="$script_dir/mbedtls-compat-sgx"
+enclave_repo="$script_dir/silentdata-enclave"
+
+# Output directories for binaries
+build_out="$script_dir/out"
+mkdir -p $build_out
+
+sdk_prefix="/linux-sgx"
+sdk_install_path="/linux-sgx/sgxsdk"
+
+# Default values for location of toolset, sdk, and mbedtls
+toolset_dir="$script_dir/sgx/external/toolset/ubuntu20.04"
+sdk_installer="$(find $script_dir -name "sgx_linux_x64_sdk*.bin")"
+mbed_dir="$mbed_repo/build/mbedtls_SGX-2.24.0/"
+
+build_mbedtls_sgx()
+{
+    # Clean the old build
+    if [ -d $mbed_repo/build ]; then
+        rm -rf $mbed_repo/build
+    fi
+    mkdir -p $mbed_repo/build
+
+    # Build mbedtls-compat-sgx
+    pushd .
+    cd $mbed_repo/build
+    cmake $mbed_repo
+    make && make install
+    popd
+}
+
+build_silentdata()
+{
+    # Clean the old build
+    if [ -d $enclave_repo/build ]; then
+        rm -rf $enclave_repo/build
+    fi
+    mkdir -p $enclave_repo/build
+
+    # Build silentdata-core
+    pushd .
+    cd $enclave_repo/build
+    cmake -DBUILD_TYPE=Deploy -DMBED_DIR=$mbed_dir ..
+    make -j
+    make install
+
+    # Copy over the signed enclave and trusted libraries
+    cp -r $enclave_repo/build/install/* $build_out
+    popd
+}
+
+verify_enclave()
+{
+    pushd .
+    cd $script_dir
+    # If the enclave hasn't already been signed (which it shouldn't have been in deployment mode)
+    # sign it with the test private key
+    if [ -f $build_out/enclave/enclave_hash.hex ]; then
+        sgx_sign sign -enclave $build_out/enclave/libenclave.so \
+                      -config $enclave_repo/enclave/enclave.config.xml \
+                      -out $build_out/enclave/enclave.signed.so \
+                      -key $enclave_repo/enclave/enclave_private_test.pem
+    fi
+    sgx_sign dump -enclave $build_out/enclave/enclave.signed.so \
+                  -dumpfile $build_out/sign_out.log
+    python print_mrenclave.py $build_out/sign_out.log
+    popd
+}
+
+
+###########################################################################
+###########################################################################
+
+$sdk_installer --prefix=$sdk_prefix
+source $sdk_install_path/environment
+export MITIGATION_CFLAGS+=-B$toolset_dir
+
+build_mbedtls_sgx
+build_silentdata
+verify_enclave
+
+echo "All the targets are built out and could be found under $build_out"
+    
+exit 0
