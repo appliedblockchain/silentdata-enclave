@@ -63,8 +63,19 @@ JSONData JSONParser::get_data_from_keys(const std::map<std::string, jsmntype_t> 
                 {
                     // Check the value type is as expected
                     jsmntok_t &value_token = tokens_[value_index];
-                    if (value_token.type != key_type.second || value_token.type == JSMN_OBJECT)
+                    // If it's not the type we expect, it could be null
+                    if (value_token.type != key_type.second && value_token.type == JSMN_PRIMITIVE)
+                    {
+                        DEBUG_LOG("Key %s found but it has primative type", key_str.c_str());
+                        fill_data(value_index, key_str);
                         continue;
+                    }
+                    if (value_token.type != key_type.second || value_token.type == JSMN_OBJECT)
+                    {
+                        WARNING_LOG("Key %s found but type is wrong", key_str.c_str());
+                        continue;
+                    }
+                    DEBUG_LOG("Key %s found", key_str.c_str());
                     fill_data(value_index, key_str);
                 }
             }
@@ -72,7 +83,10 @@ JSONData JSONParser::get_data_from_keys(const std::map<std::string, jsmntype_t> 
     }
     // Check that all keys have been found
     if (data_.size() != keys.size())
+    {
+        WARNING_LOG("Not all keys found, expected %i, found %i", keys.size(), data_.size());
         valid_ = false;
+    }
     return data_;
 }
 

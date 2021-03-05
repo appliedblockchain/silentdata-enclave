@@ -66,6 +66,7 @@ void rsa_sign(const RSAParams &rsa_params,
               std::vector<uint8_t> data,
               sgx_rsa3072_signature_t &signature)
 {
+    DEBUG_LOG("Signing with enclaves private key");
     sgx_rsa3072_key_t private_key;
     memcpy(private_key.mod, rsa_params.n, sizeof(rsa_params.n));
     memcpy(private_key.e, rsa_params.e, sizeof(rsa_params.e));
@@ -76,6 +77,8 @@ void rsa_sign(const RSAParams &rsa_params,
     if (sign_result != SGX_SUCCESS)
         THROW_EXCEPTION(sgx_error_status(sign_result),
                         sgx_error_message("sgx_rsa3072_sign", sign_result));
+
+    DEBUG_HEX_LOG("Signature:", &signature, 384);
 }
 
 void ecdh(const sgx_ec256_private_t *local_private_key,

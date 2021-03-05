@@ -1,5 +1,6 @@
 # Plaid library
 set(E_PLAID_SRCS plaid_attestation.cpp
+                 plaid_comparison_functions.cpp
                  plaid_requests.cpp
                  plaid_errors.cpp)
 

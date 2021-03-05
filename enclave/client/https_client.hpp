@@ -182,13 +182,17 @@ protected:
     bool check_certificate_expiration(const mbedtls_x509_crt *cert);
     // Return the certificate chain of the server
     std::string get_certificate_chain();
-    // Recursive function to write mbedtls certificate chain in PEM format
-    size_t certificate_data(const mbedtls_x509_crt *certificate,
-                            unsigned char *buffer,
-                            size_t buffer_length);
     // Parse a HTTP response from a HTTPS client to obtain the body
-    httpparser::HttpResponseParser::ParseResult parse_http(unsigned char *buffer,
-                                                           httpparser::Response &response);
+    struct HTTPParseResult
+    {
+        httpparser::HttpResponseParser::ParseResult status;
+        httpparser::Response response;
+        HTTPParseResult(httpparser::HttpResponseParser::ParseResult s, httpparser::Response r)
+            : status(s), response(r)
+        {
+        }
+    };
+    HTTPParseResult parse_http(unsigned char *buffer);
     // Compare server certificate to allowed pinned certificates
     static int pinned_verify(void *pinned_chain, mbedtls_x509_crt *crt, int depth, uint32_t *flags);
 };

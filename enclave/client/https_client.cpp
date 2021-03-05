@@ -116,14 +116,13 @@ HTTPSClient::get(const char *endpoint, const std::vector<char *> &headers, Clien
         THROW_EXCEPTION(e.get_code(), "Sending GET request failed");
     }
 
-    httpparser::Response response;
     bool parse_valid = true;
-    httpparser::HttpResponseParser::ParseResult res = parse_http(output, response);
-    if (res != httpparser::HttpResponseParser::ParsingCompleted)
+    HTTPParseResult parse_result = parse_http(output);
+    if (parse_result.status != httpparser::HttpResponseParser::ParsingCompleted)
         parse_valid = false;
 
     // Return the response and certificate_chain from the server
-    HTTPSResponse https_response(response, certificate_chain_str_, parse_valid);
+    HTTPSResponse https_response(parse_result.response, certificate_chain_str_, parse_valid);
     return https_response;
 }
 
@@ -148,14 +147,13 @@ HTTPSResponse HTTPSClient::post(const char *endpoint,
         THROW_EXCEPTION(e.get_code(), "Sending POST request failed");
     }
 
-    httpparser::Response response;
     bool parse_valid = true;
-    httpparser::HttpResponseParser::ParseResult res = parse_http(output, response);
-    if (res != httpparser::HttpResponseParser::ParsingCompleted)
+    HTTPParseResult parse_result = parse_http(output);
+    if (parse_result.status != httpparser::HttpResponseParser::ParsingCompleted)
         parse_valid = false;
 
     // Return the response and certificate_chain from the server
-    HTTPSResponse https_response(response, certificate_chain_str_, parse_valid);
+    HTTPSResponse https_response(parse_result.response, certificate_chain_str_, parse_valid);
     return https_response;
 }
 
@@ -600,13 +598,13 @@ void HTTPSClient::send_request()
         httpparser::Response response;
         int used_length = opt_.output_length - length_;
         unsigned char *start_pointer = output_ - used_length;
-        httpparser::HttpResponseParser::ParseResult res = parse_http(start_pointer, response);
-        if (res == httpparser::HttpResponseParser::ParsingCompleted)
+        HTTPParseResult parse_result = parse_http(start_pointer);
+        if (parse_result.status == httpparser::HttpResponseParser::ParsingCompleted)
         {
             output_[len] = 0;
             break;
         }
-        else if (res == httpparser::HttpResponseParser::ParsingError)
+        else if (parse_result.status == httpparser::HttpResponseParser::ParsingError)
         {
             THROW_EXCEPTION(kClientReadError, "Parsing HTTP response failed");
         }
@@ -704,25 +702,13 @@ bool HTTPSClient::check_certificate_expiration(const mbedtls_x509_crt *cert)
 // Return the certificate chain of the server
 std::string HTTPSClient::get_certificate_chain()
 {
-    size_t buffer_length = 10000;
-    unsigned char buffer[buffer_length];
+    std::string certificate_chain;
     // Get the current certificate
     const mbedtls_x509_crt *certificate = mbedtls_ssl_get_peer_cert(&ssl_);
-    size_t return_code = certificate_data(certificate, buffer, buffer_length);
-    // Return -1 for a failure or the length of the writter certificate for success
-    if (return_code == 0 || return_code > buffer_length)
-        return 0;
-    std::string cert_chain((char *)buffer);
-    return cert_chain;
-}
-
-// Recursive function to write mbedtls certificate chain in PEM format
-size_t HTTPSClient::certificate_data(const mbedtls_x509_crt *certificate,
-                                     unsigned char *buffer,
-                                     size_t buffer_length)
-{
-    if (certificate != NULL)
+    while (certificate != NULL)
     {
+        size_t buffer_length = 10000;
+        unsigned char buffer[buffer_length];
         // Get the certificate in DER format (binary)
         mbedtls_x509_buf der_buffer = certificate->raw;
         // Convert to PEM (base64 with header and footer)
@@ -737,33 +723,33 @@ size_t HTTPSClient::certificate_data(const mbedtls_x509_crt *certificate,
         if (ret != 0)
         {
             print_mbedtls_error("mbedtls_pem_write_buffer", ret);
-            return 0;
+            THROW_EXCEPTION(kClientCertificateParseError, "Failed to write certificate as PEM");
         }
         if (pem_len >= buffer_length)
-        {
-            ERROR_LOG("Certificate writing failed, buffer not long enough.");
-            return 0;
-        }
+            THROW_EXCEPTION(kClientCertificateParseError,
+                            "Certificate writing failed, buffer not long enough");
 
-        // Recursively append to the end of the buffer until the bottom of the certificate
-        // chain is reached (-1 to overwrite the null terminator)
-        return certificate_data(
-            certificate->next, buffer + pem_len - 1, buffer_length - pem_len + 1);
+        certificate_chain += std::string((char *)buffer);
+        certificate = certificate->next;
     }
-    return buffer_length;
+    if (certificate_chain.length() > 10000)
+        THROW_EXCEPTION(kClientCertificateParseError,
+                        "Certificate chain longer than maximum output from ECall");
+
+    return certificate_chain;
 }
 
 // Parse a HTTP response from a HTTPS client to obtain the body
-httpparser::HttpResponseParser::ParseResult HTTPSClient::parse_http(unsigned char *buffer,
-                                                                    httpparser::Response &response)
+HTTPSClient::HTTPParseResult HTTPSClient::parse_http(unsigned char *buffer)
 {
     const char *begin = static_cast<const char *>(static_cast<void *>(buffer));
     size_t buf_len = strlen(begin);
 
+    httpparser::Response response;
     httpparser::HttpResponseParser parser;
     httpparser::HttpResponseParser::ParseResult res =
         parser.parse(response, begin, begin + buf_len);
-    return res;
+    return HTTPParseResult(res, response);
 }
 
 // https://github.com/Intevation/mxe/blob/trustbridge/src/curl-2-curlopt-peercert.patch

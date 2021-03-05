@@ -162,7 +162,7 @@ PlaidLink plaid_create_link_token(HTTPSClient &client,
     json::JSON user = json::Object();
     user["client_user_id"] = client_user_id;
     request["user"] = user;
-    request["products"] = json::Array("transactions");
+    request["products"] = json::Array("identity");
     request["redirect_uri"] = redirect_uri;
     std::string request_body = request.dump();
 
@@ -460,7 +460,9 @@ std::vector<PlaidTransaction> plaid_get_all_transactions(HTTPSClient &client,
     return transactions;
 }
 
-std::string plaid_get_account_holder_name(HTTPSClient &client, const PlaidConfiguration &config)
+std::string plaid_get_account_holder_name(HTTPSClient &client,
+                                          const PlaidConfiguration &config,
+                                          const std::string &account_id)
 {
     ClientOptions opt = client.get_client_options();
     opt.output_length = 22000;
@@ -475,6 +477,13 @@ std::string plaid_get_account_holder_name(HTTPSClient &client, const PlaidConfig
     request_body["client_id"] = config.client_id;
     request_body["secret"] = config.secret;
     request_body["access_token"] = config.access_token;
+    // If we're matching a specific account
+    if (account_id != "")
+    {
+        json::JSON options = json::Object();
+        options["account_ids"] = json::Array(account_id);
+        request_body["options"] = options;
+    }
     std::string request_body_str = request_body.dump();
 
     DEBUG_LOG("Sending /identity/get POST request to Plaid");
@@ -494,13 +503,15 @@ std::string plaid_get_account_holder_name(HTTPSClient &client, const PlaidConfig
         THROW_ERROR_CODE(error_code);
     }
 
-    std::map<std::string, jsmntype_t> keys = {{"accounts->owners->names", JSMN_ARRAY}};
+    std::map<std::string, jsmntype_t> keys = {{"accounts->owners->names", JSMN_ARRAY},
+                                              {"accounts->account_id", JSMN_STRING}};
     JSONParser parser(response.get_body(), max_tokens);
     JSONData data = parser.get_data_from_keys(keys);
     if (!parser.is_valid())
         THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body");
 
     std::vector<std::string> names = data.get_all("accounts->owners->names");
+    std::vector<std::string> account_ids = data.get_all("accounts->account_id");
     if (names.size() == 0)
         THROW_EXCEPTION(kJSONParseError,
                         "Could not obtain the account holder name from the JSON body");
@@ -581,6 +592,127 @@ std::string plaid_get_institution_name(HTTPSClient &client, const PlaidConfigura
     std::string institution_name = name_data.get("institution->name");
 
     return institution_name;
+}
+
+std::vector<PlaidAccount> plaid_get_account_details(HTTPSClient &client,
+                                                    const PlaidConfiguration &config)
+{
+    ClientOptions opt = client.get_client_options();
+    opt.output_length = 6000;
+    int max_tokens = 500;
+
+    std::string host = config.environment + std::string(".plaid.com");
+    std::string host_header = "Host: " + host;
+    std::string content_header = "Content-Type: application/json";
+    std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
+
+    json::JSON request_body = json::Object();
+    request_body["client_id"] = config.client_id;
+    request_body["secret"] = config.secret;
+    request_body["access_token"] = config.access_token;
+    std::string request_body_str = request_body.dump();
+
+    DEBUG_LOG("Sending /auth/get POST request to Plaid");
+    HTTPSResponse response = client.post("/auth/get", headers, request_body_str.c_str(), opt);
+    // An invalid response could be due to the output length not being long enough
+    if (!response.is_valid())
+    {
+        opt.output_length = 2 * opt.output_length;
+        max_tokens = 2 * max_tokens;
+        response = client.post("/auth/get", headers, request_body_str.c_str(), opt);
+    }
+    if (!response.is_valid())
+        THROW_ERROR_CODE(kHTTPResponseParseError);
+    if (response.get_status_code() != 200)
+    {
+        core_status_code error_code = parse_plaid_error(response);
+        THROW_ERROR_CODE(error_code);
+    }
+
+    // Parse the response to get the account details of all associated accounts
+    std::map<std::string, jsmntype_t> keys = {{"numbers->bacs->account", JSMN_STRING},
+                                              {"numbers->bacs->sort_code", JSMN_STRING},
+                                              {"numbers->bacs->account_id", JSMN_STRING},
+                                              {"numbers->international->iban", JSMN_STRING},
+                                              {"numbers->international->account_id", JSMN_STRING}};
+    JSONParser parser(response.get_body(), max_tokens);
+    JSONData data = parser.get_data_from_keys(keys);
+    if (!parser.is_valid())
+        WARNING_LOG("Not all account fields found");
+
+    // Create objects containing account details
+    std::vector<std::string> account_numbers;
+    std::vector<std::string> sort_codes;
+    std::vector<std::string> bacs_ids;
+    try
+    {
+        account_numbers = data.get_all("numbers->bacs->account");
+        sort_codes = data.get_all("numbers->bacs->sort_code");
+        bacs_ids = data.get_all("numbers->bacs->account_id");
+    }
+    catch (const EnclaveException &e)
+    {
+        WARNING_LOG("No BACS bank number information present");
+    }
+    std::vector<std::string> ibans;
+    std::vector<std::string> international_ids;
+    try
+    {
+        ibans = data.get_all("numbers->international->iban");
+        international_ids = data.get_all("numbers->international->account_id");
+    }
+    catch (const EnclaveException &e)
+    {
+        WARNING_LOG("No international bank number information present");
+    }
+    std::vector<PlaidAccount> account_details;
+    for (size_t i = 0; i < account_numbers.size(); i++)
+    {
+        uint32_t account_number = 0;
+        if (account_numbers[i] != "null")
+            account_number = static_cast<uint32_t>(std::stoul(account_numbers[i], nullptr, 10));
+        else
+            WARNING_LOG("Account number is null");
+        uint32_t sort_code = 0;
+        if (sort_codes[i] != "null")
+            sort_code = static_cast<uint32_t>(std::stoul(sort_codes[i], nullptr, 10));
+        else
+            WARNING_LOG("Sort code is null");
+        std::string iban = "";
+        // Extra check as bacs and international numbers come in separate lists, and the order of
+        // the list items is not guaranteed
+        std::string bacs_id = bacs_ids[i];
+        for (size_t j = 0; j < ibans.size(); j++)
+        {
+            if (bacs_id == international_ids[j])
+            {
+                if (ibans[j] != "null")
+                    iban = ibans[j];
+                else
+                    WARNING_LOG("IBAN is null");
+            }
+        }
+        account_details.push_back(PlaidAccount(account_number, sort_code, iban, bacs_id));
+    }
+    // If only international numbers are present
+    if (account_numbers.size() == 0 && ibans.size() != 0)
+    {
+        for (size_t i = 0; i < ibans.size(); i++)
+        {
+            uint32_t account_number = 0;
+            uint32_t sort_code = 0;
+            std::string iban = "";
+            if (ibans[i] != "null")
+                iban = ibans[i];
+            else
+                WARNING_LOG("IBAN is null");
+            std::string international_id = international_ids[i];
+            account_details.push_back(
+                PlaidAccount(account_number, sort_code, iban, international_id));
+        }
+    }
+
+    return account_details;
 }
 
 } // namespace enclave

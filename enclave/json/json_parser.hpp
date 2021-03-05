@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "enclave/common/enclave_logger.hpp"
 #include "enclave/json/jsmn.h"
 #include "enclave/json/json_data.hpp"
 

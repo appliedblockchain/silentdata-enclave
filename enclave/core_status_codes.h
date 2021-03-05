@@ -9,6 +9,13 @@ enum access_token_status
     kAccessTokenDestroyed
 };
 
+enum auth_support
+{
+    kAuthBACSAndIBANSupported = 1,
+    kAuthBACSNotSupported = 2,
+    kAuthIBANNotSupported = 3
+};
+
 enum core_status_code
 {
     kSuccess = 0,
@@ -83,6 +90,11 @@ enum core_status_code
     kMinimumBalanceRequirementsNotMet = 10401,
     kConsistentIncomeInvalidInput = 10500,
     kConsistentIncomeRequirementsNotMet = 10501,
+    kAccountOwnershipInvalidInput = 10600,
+    kAccountOwnershipNoMatchingAccount = 10601,
+    kAccountOwnershipBACSNotSupported = 10602,
+    kAccountOwnershipIBANNotSupported = 10603,
+    kAccountOwnershipBACSAndIBANNotSupported = 10604,
     kJSONRPCParseError = -32700,
     kJSONRPCInvalidRequest = -32600,
     kJSONRPCMethodNotFound = -32601,

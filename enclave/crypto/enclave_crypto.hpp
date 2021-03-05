@@ -13,6 +13,7 @@
 #include "sgx_trts.h"
 
 #include "enclave/common/enclave_exception.hpp"
+#include "enclave/common/enclave_logger.hpp"
 #include "enclave/common/sgx_error_message.hpp"
 #include "enclave/crypto/ecc_key_pair.hpp"
 #include "enclave/crypto/rsa_params.hpp"

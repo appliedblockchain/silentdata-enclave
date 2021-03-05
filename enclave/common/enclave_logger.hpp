@@ -16,6 +16,8 @@ enum enclave_log_level
     kEnclaveLogLevelDebug = 5
 };
 
+void hexdump(const char *title, void const *data, unsigned int len);
+
 #ifndef LOG_BUILD_LEVEL
 #ifdef NDEBUG
 #define LOG_BUILD_LEVEL kEnclaveLogLevelNone
@@ -37,7 +39,7 @@ extern const char *log_level_strings[];
         if (LOG_SHOULD_I(level))                                                                   \
         {                                                                                          \
             const char *file_name = strrchr(__FILE__, '/') + 1;                                    \
-            mbedtls_compat_sgx_printf("[%s] %s:%s:%d: " fmt "\n",                                  \
+            mbedtls_compat_sgx_printf("%s: %s:%s:%d: " fmt "\n",                                   \
                                       log_level_strings[level],                                    \
                                       file_name,                                                   \
                                       __FUNCTION__,                                                \
@@ -46,11 +48,24 @@ extern const char *log_level_strings[];
         }                                                                                          \
     } while (0)
 
+#define ENCLAVE_HEX_LOG(level, name, dat, len)                                                     \
+    do                                                                                             \
+    {                                                                                              \
+        if (LOG_SHOULD_I(level))                                                                   \
+        {                                                                                          \
+            const char *file_name = strrchr(__FILE__, '/') + 1;                                    \
+            mbedtls_compat_sgx_printf(                                                             \
+                "%s: %s:%s:%d: ", log_level_strings[level], file_name, __FUNCTION__, __LINE__);    \
+            hexdump(name, dat, len);                                                               \
+        }                                                                                          \
+    } while (0)
+
 #define DEBUG_LOG(fmt, arg...) ENCLAVE_LOG(kEnclaveLogLevelDebug, fmt, ##arg)
 #define INFO_LOG(fmt, arg...) ENCLAVE_LOG(kEnclaveLogLevelInfo, fmt, ##arg)
 #define WARNING_LOG(fmt, arg...) ENCLAVE_LOG(kEnclaveLogLevelWarning, fmt, ##arg)
 #define ERROR_LOG(fmt, arg...) ENCLAVE_LOG(kEnclaveLogLevelError, fmt, ##arg)
 #define CRITICAL_LOG(fmt, arg...) ENCLAVE_LOG(kEnclaveLogLevelCritical, fmt, ##arg)
+#define DEBUG_HEX_LOG(name, dat, len) ENCLAVE_HEX_LOG(kEnclaveLogLevelDebug, name, dat, len)
 // Not a macro but named like one for consistency
 void EXCEPTION_LOG(const std::runtime_error &e);
 

@@ -19,6 +19,7 @@ script_dir="$(pwd)"
 code_dir="$script_dir/code_dir"
 option="all"
 branch="none"
+copy_self="false"
 
 # Set the directory names for all of the different packages
 sgx_repo="$code_dir/sgx"
@@ -29,6 +30,7 @@ mount_dir="/linux-sgx"
 
 parse_cmd()
 {
+    echo "parsing command"
     while [ "$1" != "" ]; do
         case $1 in
             -d | --code-dir ) shift
@@ -43,11 +45,15 @@ parse_cmd()
             -b | --branch ) shift
                 branch="$1"
                 ;;
+            -s | --self ) shift
+                copy_self="true"
+                ;;
             * )
                 exit 1
         esac
         shift
     done
+    echo "done parsing"
     mkdir -p "$code_dir" | exit
     # Reset the directory names in case the code_dir has changed
     code_dir="$(realpath $code_dir)"
@@ -104,6 +110,16 @@ prepare_silentdata()
     fi
 }
 
+copy_silentdata()
+{
+    if [ -d $enclave_repo ]; then
+        echo "Removing existing silentdata-enclave code repo in $enclave_repo"
+        rm -rf $enclave_repo
+    fi
+    exclude_dir="$(realpath --relative-to=$script_dir $code_dir)"
+    rsync -a --exclude=$exclude_dir ./* $enclave_repo
+}
+
 generate_cmd_script()
 {
     rm -rf $code_dir/cmd.sh
@@ -128,7 +144,11 @@ if [ "$option" == "provision" ] || [ "$option" == "all" ]; then
     prepare_sgx_src
     prepare_sdk_installer
     prepare_mbedtls_sgx
-    prepare_silentdata
+    if [ "$copy_self" == "true" ]; then
+        copy_silentdata
+    else
+        prepare_silentdata
+    fi
 
     cp $script_dir/print_mrenclave.py $code_dir
     cp $script_dir/start_build.sh.tmp $code_dir/start_build.sh

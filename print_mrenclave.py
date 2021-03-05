@@ -14,3 +14,5 @@ with open(sys.argv[1], 'r') as f:
             for mr_hex in mr_hexes:
                 mrenclave += mr_hex[2:]
 print('MRENCLAVE = ' + str(mrenclave))
+with open("MRENCLAVE_value.txt", "w") as f:
+    f.write(str(mrenclave))

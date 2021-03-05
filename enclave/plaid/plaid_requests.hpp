@@ -55,6 +55,18 @@ struct PlaidTransaction
     struct tm date;
 };
 
+struct PlaidAccount
+{
+    PlaidAccount(uint32_t a, uint32_t s, const std::string &i, const std::string &id)
+        : account_number(a), sort_code(s), iban(i), account_id(id)
+    {
+    }
+    uint32_t account_number;
+    uint32_t sort_code;
+    std::string iban;
+    std::string account_id;
+};
+
 // Send a request to the Plaid API to create a link token for a user
 PlaidLink plaid_create_link_token(HTTPSClient &client,
                                   const PlaidConfiguration &config,
@@ -79,10 +91,16 @@ std::vector<PlaidTransaction> plaid_get_all_transactions(HTTPSClient &client,
                                                          struct tm end_date);
 
 // Send a request to the Plaid API to get the most common account holder name
-std::string plaid_get_account_holder_name(HTTPSClient &client, const PlaidConfiguration &config);
+std::string plaid_get_account_holder_name(HTTPSClient &client,
+                                          const PlaidConfiguration &config,
+                                          const std::string &account_id = "");
 
 // Get the institution ID from the balance data and obtain the name from the ID
 std::string plaid_get_institution_name(HTTPSClient &client, const PlaidConfiguration &config);
+
+// Get account information for all associated accounts
+std::vector<PlaidAccount> plaid_get_account_details(HTTPSClient &client,
+                                                    const PlaidConfiguration &config);
 
 } // namespace enclave
 } // namespace silentdata

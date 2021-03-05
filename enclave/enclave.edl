@@ -4,12 +4,12 @@ enclave {
     from "mbedtls_SGX.edl" import *;
     from "sgx_tstdc.edl" import sgx_oc_cpuidex;
 
-    struct plaid_min_balance_attestation_data {
+    struct plaid_minimum_balance_attestation_data {
         char nonce[16];
         char timestamp[64];
         char account_holder_name[128];
         char institution_name[128];
-        int32_t min_balance;
+        int32_t minimum_balance;
     };
 
     struct plaid_consistent_income_attestation_data {
@@ -18,6 +18,17 @@ enclave {
         char account_holder_name[128];
         char institution_name[128];
         int32_t consistent_income;
+    };
+
+    struct plaid_account_ownership_attestation_data {
+        char nonce[16];
+        char timestamp[64];
+        char account_holder_name[128];
+        char institution_name[128];
+        int32_t account_number;
+        int32_t sort_code;
+        char iban[35];
+        enum auth_support supported_bank_info;
     };
 
     trusted {
@@ -33,16 +44,16 @@ enclave {
             [in, size=29] uint8_t* encrypted_input,
             [out, size=336] uint8_t* enc_data);
 
-        public enum core_status_code plaid_min_balance_attestation(
+        public enum core_status_code plaid_minimum_balance_attestation(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             [in, size=16] uint8_t* nonce,
-            int32_t min_balance,
+            int32_t minimum_balance,
             int32_t client_timestamp,
             [in, size=84] uint8_t* encrypted_input,
-            [out] struct plaid_min_balance_attestation_data* attestation,
+            [out] struct plaid_minimum_balance_attestation_data* attestation,
             [out, size=10000] char* certificate_chain,
             [out, size=384] uint8_t* signature,
             [out] enum access_token_status* access_status);
@@ -57,6 +68,22 @@ enclave {
             int32_t client_timestamp,
             [in, size=84] uint8_t* encrypted_input,
             [out] struct plaid_consistent_income_attestation_data* attestation,
+            [out, size=10000] char* certificate_chain,
+            [out, size=384] uint8_t* signature,
+            [out] enum access_token_status* access_status);
+
+        public enum core_status_code plaid_account_ownership_attestation(
+            [in, string] const char* client_id,
+            [in, string] const char* secret,
+            [in, string] const char* plaid_environment,
+            [in, size=64] uint8_t* client_public_key,
+            [in, size=16] uint8_t* nonce,
+            uint32_t account_number,
+            uint32_t sort_code,
+            [in, string] const char* iban,
+            int32_t client_timestamp,
+            [in, size=84] uint8_t* encrypted_input,
+            [out] struct plaid_account_ownership_attestation_data* attestation,
             [out, size=10000] char* certificate_chain,
             [out, size=384] uint8_t* signature,
             [out] enum access_token_status* access_status);

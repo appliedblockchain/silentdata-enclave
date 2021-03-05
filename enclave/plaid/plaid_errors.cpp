@@ -15,6 +15,7 @@ core_status_code parse_plaid_error(HTTPSResponse response)
     // Details of Plaid error codes: https://plaid.com/docs/errors/
     try
     {
+        ERROR_LOG("Plaid Error:\n%s", response.get_body().c_str());
         std::map<std::string, jsmntype_t> error_keys = {{"error_type", JSMN_STRING},
                                                         {"error_code", JSMN_STRING}};
         JSONParser error_parser(response.get_body(), 20);
