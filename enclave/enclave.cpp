@@ -407,19 +407,19 @@ plaid_minimum_balance_attestation(const char *client_id,
 //         - certificate_chain = The certificate chain for Plaid
 //         - signature = attestation + certificate chain signed with private key
 //         - access_status = Whether the access token has been destroyed correctly
-core_status_code
-plaid_consistent_income_attestation(const char *client_id,
-                                    const char *secret,
-                                    const char *plaid_environment,
-                                    uint8_t *client_public_key_bytes,
-                                    uint8_t *nonce,
-                                    int32_t consistent_income,
-                                    int32_t client_timestamp,
-                                    uint8_t *encrypted_input,
-                                    plaid_consistent_income_attestation_data *attestation,
-                                    char *certificate_chain,
-                                    uint8_t *signature,
-                                    access_token_status *access_status)
+core_status_code plaid_income_attestation(const char *client_id,
+                                          const char *secret,
+                                          const char *plaid_environment,
+                                          uint8_t *client_public_key_bytes,
+                                          uint8_t *nonce,
+                                          int32_t consistent_income,
+                                          bool stable,
+                                          int32_t client_timestamp,
+                                          uint8_t *encrypted_input,
+                                          plaid_consistent_income_attestation_data *attestation,
+                                          char *certificate_chain,
+                                          uint8_t *signature,
+                                          access_token_status *access_status)
 {
     // Validate function argument pointers
     if (client_id == nullptr || secret == nullptr || plaid_environment == nullptr ||
@@ -529,7 +529,13 @@ plaid_consistent_income_attestation(const char *client_id,
         return e.get_code();
     }
 
-    if (!plaid_check_income(transactions, start_date, end_date, consistent_income))
+    if (stable && !plaid_check_stable_income(transactions, start_date, end_date, consistent_income))
+    {
+        *access_status = plaid_destroy_access(client, plaid_config);
+        WARNING_LOG("Consistent stable income requirements were not met");
+        return kConsistentIncomeRequirementsNotMet;
+    }
+    else if (!stable && !plaid_check_income(transactions, start_date, end_date, consistent_income))
     {
         *access_status = plaid_destroy_access(client, plaid_config);
         WARNING_LOG("Consistent income requirements were not met");
@@ -577,8 +583,11 @@ plaid_consistent_income_attestation(const char *client_id,
     sgx_rsa3072_signature_t sig;
     try
     {
+        attestation_type type = kConsistentIncomeAttestation;
+        if (stable)
+            type = kStableIncomeAttestation;
         std::vector<uint8_t> attestation_data =
-            create_plaid_attestation_data(kConsistentIncomeAttestation,
+            create_plaid_attestation_data(type,
                                           nonce,
                                           access.timestamp,
                                           account_holder_name,
@@ -596,6 +605,64 @@ plaid_consistent_income_attestation(const char *client_id,
     memcpy(signature, sig, 384);
 
     return kSuccess;
+}
+
+core_status_code
+plaid_consistent_income_attestation(const char *client_id,
+                                    const char *secret,
+                                    const char *plaid_environment,
+                                    uint8_t *client_public_key_bytes,
+                                    uint8_t *nonce,
+                                    int32_t consistent_income,
+                                    int32_t client_timestamp,
+                                    uint8_t *encrypted_input,
+                                    plaid_consistent_income_attestation_data *attestation,
+                                    char *certificate_chain,
+                                    uint8_t *signature,
+                                    access_token_status *access_status)
+{
+    return plaid_income_attestation(client_id,
+                                    secret,
+                                    plaid_environment,
+                                    client_public_key_bytes,
+                                    nonce,
+                                    consistent_income,
+                                    false,
+                                    client_timestamp,
+                                    encrypted_input,
+                                    attestation,
+                                    certificate_chain,
+                                    signature,
+                                    access_status);
+}
+
+core_status_code
+plaid_stable_income_attestation(const char *client_id,
+                                const char *secret,
+                                const char *plaid_environment,
+                                uint8_t *client_public_key_bytes,
+                                uint8_t *nonce,
+                                int32_t consistent_income,
+                                int32_t client_timestamp,
+                                uint8_t *encrypted_input,
+                                plaid_consistent_income_attestation_data *attestation,
+                                char *certificate_chain,
+                                uint8_t *signature,
+                                access_token_status *access_status)
+{
+    return plaid_income_attestation(client_id,
+                                    secret,
+                                    plaid_environment,
+                                    client_public_key_bytes,
+                                    nonce,
+                                    consistent_income,
+                                    true,
+                                    client_timestamp,
+                                    encrypted_input,
+                                    attestation,
+                                    certificate_chain,
+                                    signature,
+                                    access_status);
 }
 
 // Exchange a public token for an access token and obtain the users account holder name from the

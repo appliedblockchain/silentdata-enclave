@@ -18,6 +18,8 @@ std::vector<uint8_t> create_plaid_attestation_data(attestation_type type,
         DEBUG_LOG("Serializing minimum balance attestation data.");
     else if (type == kConsistentIncomeAttestation)
         DEBUG_LOG("Serializing consistent income attestation data.");
+    else if (type == kStableIncomeAttestation)
+        DEBUG_LOG("Serializing stable income attestation data.");
     else
         THROW_EXCEPTION(kSigningError, "Invalid attestation type");
 

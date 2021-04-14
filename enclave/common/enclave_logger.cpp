@@ -17,46 +17,77 @@ void EXCEPTION_LOG(const std::runtime_error &e)
     }
 }
 
-void hexdump(const char *title, void const *data, unsigned int len)
+void hexdump(const char *title,
+             void const *data,
+             unsigned int hex_length,
+             const char *level,
+             const char *file_name,
+             const char *function,
+             int line)
 {
     unsigned int i;
-    unsigned int r, c;
+    size_t row, col;
+    size_t rows = (hex_length / 16 + (hex_length % 16 != 0));
+    size_t max_buffer_length = 100 * rows + 200;
+    char buffer[max_buffer_length];
 
     if (!data)
         return;
 
-    mbedtls_compat_sgx_printf("%s\n", title);
+    int len = snprintf(
+        buffer, sizeof(buffer) - 1, "%s: %s:%s:%d: %s\n", level, file_name, function, line, title);
 
-    for (r = 0, i = 0; r < (len / 16 + (len % 16 != 0)); r++, i += 16)
+    for (row = 0, i = 0; row < rows; row++, i += 16)
     {
-        mbedtls_compat_sgx_printf("0x%04X:   ", i); /* location of first byte in line */
+        // location of first byte in line
+        len += snprintf(buffer + len, sizeof(buffer) - 1 - len, "0x%04X:   ", i);
 
-        for (c = i; c < i + 8; c++) /* left half of hex dump */
-            if (c < len)
-                mbedtls_compat_sgx_printf("%02X ", ((unsigned char const *)data)[c]);
+        // left half of hex dump
+        for (col = i; col < i + 8; col++)
+        {
+            if (col < hex_length)
+                len += snprintf(buffer + len,
+                                sizeof(buffer) - 1 - len,
+                                "%02X ",
+                                ((unsigned char const *)data)[col]);
             else
-                mbedtls_compat_sgx_printf("   "); /* pad if short line */
+                len += snprintf(buffer + len, sizeof(buffer) - 1 - len, "   "); // pad if short line
+        }
 
-        mbedtls_compat_sgx_printf("  ");
+        len += snprintf(buffer + len, sizeof(buffer) - 1 - len, "  ");
 
-        for (c = i + 8; c < i + 16; c++) /* right half of hex dump */
-            if (c < len)
-                mbedtls_compat_sgx_printf("%02X ", ((unsigned char const *)data)[c]);
+        // right half of hex dump
+        for (col = i + 8; col < i + 16; col++)
+        {
+            if (col < hex_length)
+                len += snprintf(buffer + len,
+                                sizeof(buffer) - 1 - len,
+                                "%02X ",
+                                ((unsigned char const *)data)[col]);
             else
-                mbedtls_compat_sgx_printf("   "); /* pad if short line */
+                len += snprintf(buffer + len, sizeof(buffer) - 1 - len, "   "); // pad if short line
+        }
 
-        mbedtls_compat_sgx_printf("   ");
+        len += snprintf(buffer + len, sizeof(buffer) - 1 - len, "   ");
 
-        for (c = i; c < i + 16; c++) /* ASCII dump */
-            if (c < len)
-                if (((unsigned char const *)data)[c] >= 32 &&
-                    ((unsigned char const *)data)[c] < 127)
-                    mbedtls_compat_sgx_printf("%c", ((char const *)data)[c]);
+        // ASCII dump
+        for (col = i; col < i + 16; col++)
+        {
+            if (col < hex_length)
+                if (((unsigned char const *)data)[col] >= 32 &&
+                    ((unsigned char const *)data)[col] < 127)
+                    len += snprintf(
+                        buffer + len, sizeof(buffer) - 1 - len, "%c", ((char const *)data)[col]);
                 else
-                    mbedtls_compat_sgx_printf("."); /* put this for non-printables */
+                    len += snprintf(
+                        buffer + len, sizeof(buffer) - 1 - len, "."); // put this for non-printables
             else
-                mbedtls_compat_sgx_printf(" "); /* pad if short line */
+                len += snprintf(buffer + len, sizeof(buffer) - 1 - len, " "); // pad if short line
+        }
 
-        mbedtls_compat_sgx_printf("\n");
+        len += snprintf(buffer + len, sizeof(buffer) - 1 - len, "\n");
     }
+    // mbedtls_compat_sgx_printf will only print BUFSIZ chars at once
+    for (int chunk = 0; chunk < (len / BUFSIZ + (len % BUFSIZ != 0)); chunk++)
+        mbedtls_compat_sgx_printf("%s", buffer + (chunk * (BUFSIZ - 1)));
 }

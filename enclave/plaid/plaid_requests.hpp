@@ -50,9 +50,10 @@ struct PlaidAccess
 
 struct PlaidTransaction
 {
-    PlaidTransaction(double a, struct tm d) : amount(a), date(d) {}
+    PlaidTransaction(double a, struct tm d, std::string n) : amount(a), date(d), name(n) {}
     double amount;
     struct tm date;
+    std::string name;
 };
 
 struct PlaidAccount

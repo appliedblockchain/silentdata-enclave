@@ -183,5 +183,10 @@ int tm_day_difference(const struct tm &date1, const struct tm &date2)
     return difference_day;
 }
 
+int tm_month_difference(const struct tm &date1, const struct tm &date2)
+{
+    return (date2.tm_year - date1.tm_year) * 12 + date2.tm_mon - date1.tm_mon;
+}
+
 } // namespace enclave
 } // namespace silentdata

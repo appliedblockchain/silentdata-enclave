@@ -39,7 +39,8 @@ std::vector<PlaidTransaction> plaid_get_transactions(HTTPSClient &client,
     }
     std::map<std::string, jsmntype_t> keys = {{"total_transactions", JSMN_PRIMITIVE},
                                               {"transactions->amount", JSMN_PRIMITIVE},
-                                              {"transactions->date", JSMN_STRING}};
+                                              {"transactions->date", JSMN_STRING},
+                                              {"transactions->name", JSMN_STRING}};
     JSONParser parser(response.get_body(), max_tokens);
     JSONData data = parser.get_data_from_keys(keys);
 
@@ -68,6 +69,7 @@ std::vector<PlaidTransaction> plaid_get_transactions(HTTPSClient &client,
         THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body of transaction response");
     std::vector<std::string> amounts = data.get_all("transactions->amount");
     std::vector<std::string> dates = data.get_all("transactions->date");
+    std::vector<std::string> names = data.get_all("transactions->name");
     // Get the transactions of all associated accounts
     for (size_t i = 0; i < amounts.size(); i++)
     {
@@ -100,7 +102,7 @@ std::vector<PlaidTransaction> plaid_get_transactions(HTTPSClient &client,
         {
             THROW_EXCEPTION(kJSONParseError, "Could not convert amount to float");
         }
-        PlaidTransaction transaction(amount, date);
+        PlaidTransaction transaction(amount, date, names[i]);
         transactions.push_back(transaction);
     }
     return transactions;
@@ -411,7 +413,7 @@ std::vector<PlaidTransaction> plaid_get_all_transactions(HTTPSClient &client,
 
     // Get the earliest available transaction (only if there are any transactions and we don't
     // already have three months worth)
-    if (total_transactions > 0 && days_fetched < 30)
+    if (total_transactions > 0 && days_fetched <= 30)
     {
         DEBUG_LOG("Getting the first available transaction");
         request_body["options"]["count"] = 1;
@@ -434,7 +436,7 @@ std::vector<PlaidTransaction> plaid_get_all_transactions(HTTPSClient &client,
     request_body["options"]["count"] = count;
     request_body["options"]["offset"] = offset;
     request_body_str = request_body.dump();
-    while (total_transactions == prev_total_transactions && times_waited < 10 && days_fetched < 30)
+    while (total_transactions == prev_total_transactions && times_waited < 10 && days_fetched <= 30)
     {
         DEBUG_LOG("Historical transactions not available, waiting 30 seconds and trying again");
         mbedtls_net_usleep(30000000);

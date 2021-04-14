@@ -22,7 +22,8 @@ enum attestation_type
 {
     kMinimumBalanceAttestation = 1,
     kConsistentIncomeAttestation = 2,
-    kAccountOwnershipAttestation = 3
+    kAccountOwnershipAttestation = 3,
+    kStableIncomeAttestation = 4
 };
 
 // Create a padded structure of the attestation data

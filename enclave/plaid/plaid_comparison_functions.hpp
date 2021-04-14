@@ -33,6 +33,12 @@ bool plaid_check_income(const std::vector<PlaidTransaction> &transactions,
                         const struct tm &end_date,
                         int32_t consistent_income);
 
+// Check stable income (same date, same name) is above a given amount each month between two dates
+bool plaid_check_stable_income(const std::vector<PlaidTransaction> &transactions,
+                               const struct tm &start_date,
+                               const struct tm &end_date,
+                               int32_t consistent_income);
+
 // Check a linked account matches either account number + sort code / IBAN / all three
 PlaidAccountMatchResult plaid_match_account(const std::vector<PlaidAccount> &account_details,
                                             uint32_t account_number,

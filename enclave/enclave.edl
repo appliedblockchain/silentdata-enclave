@@ -72,6 +72,20 @@ enclave {
             [out, size=384] uint8_t* signature,
             [out] enum access_token_status* access_status);
 
+        public enum core_status_code plaid_stable_income_attestation(
+            [in, string] const char* client_id,
+            [in, string] const char* secret,
+            [in, string] const char* plaid_environment,
+            [in, size=64] uint8_t* client_public_key,
+            [in, size=16] uint8_t* nonce,
+            int32_t consistent_income,
+            int32_t client_timestamp,
+            [in, size=84] uint8_t* encrypted_input,
+            [out] struct plaid_consistent_income_attestation_data* attestation,
+            [out, size=10000] char* certificate_chain,
+            [out, size=384] uint8_t* signature,
+            [out] enum access_token_status* access_status);
+
         public enum core_status_code plaid_account_ownership_attestation(
             [in, string] const char* client_id,
             [in, string] const char* secret,

@@ -16,7 +16,13 @@ enum enclave_log_level
     kEnclaveLogLevelDebug = 5
 };
 
-void hexdump(const char *title, void const *data, unsigned int len);
+void hexdump(const char *title,
+             void const *data,
+             unsigned int hex_length,
+             const char *level,
+             const char *file_name,
+             const char *function,
+             int line);
 
 #ifndef LOG_BUILD_LEVEL
 #ifdef NDEBUG
@@ -54,9 +60,7 @@ extern const char *log_level_strings[];
         if (LOG_SHOULD_I(level))                                                                   \
         {                                                                                          \
             const char *file_name = strrchr(__FILE__, '/') + 1;                                    \
-            mbedtls_compat_sgx_printf(                                                             \
-                "%s: %s:%s:%d: ", log_level_strings[level], file_name, __FUNCTION__, __LINE__);    \
-            hexdump(name, dat, len);                                                               \
+            hexdump(name, dat, len, log_level_strings[level], file_name, __FUNCTION__, __LINE__);  \
         }                                                                                          \
     } while (0)
 
