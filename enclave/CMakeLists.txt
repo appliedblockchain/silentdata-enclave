@@ -3,14 +3,12 @@
 add_subdirectory(common)
 add_subdirectory(crypto)
 add_subdirectory(client)
-add_subdirectory(json)
 add_subdirectory(plaid)
 
 set(E_SRCS enclave.cpp)
 
 set(ENCLAVE_TRUSTED_LIBS enclave_common_t
                          enclave_crypto_t
-                         enclave_json_t
                          enclave_client_t
                          enclave_plaid_t)
 

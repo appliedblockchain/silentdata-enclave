@@ -183,6 +183,24 @@ int tm_day_difference(const struct tm &date1, const struct tm &date2)
     return difference_day;
 }
 
+struct tm plaid_date_to_tm(const std::string &date_str)
+{
+    struct tm date = {};
+    try
+    {
+        // tm_year is year since 1900
+        date.tm_year = std::stoi(date_str.substr(0, 4)) - 1900;
+        // tm_mon is month since January
+        date.tm_mon = std::stoi(date_str.substr(5, 2)) - 1;
+        date.tm_mday = std::stoi(date_str.substr(8, 2));
+    }
+    catch (...)
+    {
+        THROW_EXCEPTION(kJSONParseError, "Could not convert date to integer");
+    }
+    return date;
+}
+
 int tm_month_difference(const struct tm &date1, const struct tm &date2)
 {
     return (date2.tm_year - date1.tm_year) * 12 + date2.tm_mon - date1.tm_mon;

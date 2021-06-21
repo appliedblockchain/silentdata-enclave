@@ -72,11 +72,10 @@ void rsa_sign(const RSAParams &rsa_params,
     memcpy(private_key.e, rsa_params.e, sizeof(rsa_params.e));
     memcpy(private_key.d, rsa_params.d, sizeof(rsa_params.d));
 
-    sgx_status_t sign_result =
+    sgx_status_t ret =
         sgx_rsa3072_sign(data.data(), static_cast<uint32_t>(data.size()), &private_key, &signature);
-    if (sign_result != SGX_SUCCESS)
-        THROW_EXCEPTION(sgx_error_status(sign_result),
-                        sgx_error_message("sgx_rsa3072_sign", sign_result));
+    if (ret != SGX_SUCCESS)
+        THROW_EXCEPTION(sgx_error_status(ret), sgx_error_message("sgx_rsa3072_sign", ret));
 
     DEBUG_HEX_LOG("Signature:", &signature, 384);
 }
@@ -91,7 +90,7 @@ void ecdh(const sgx_ec256_private_t *local_private_key,
     memcpy(peer_public_key.gy, peer_public_key_bytes + 32, 32);
 
     sgx_ecc_state_handle_t handle;
-    auto ret = sgx_ecc256_open_context(&handle);
+    sgx_status_t ret = sgx_ecc256_open_context(&handle);
     if (ret != SGX_SUCCESS)
         THROW_EXCEPTION(kECDHError, sgx_error_message("sgx_ecc256_open_context", ret));
 

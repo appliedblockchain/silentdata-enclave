@@ -61,6 +61,55 @@ std::vector<uint8_t> create_plaid_attestation_data(attestation_type type,
     return attestation_data;
 }
 
+// Create a padded structure of the attestation data for contracts
+std::vector<uint8_t> create_plaid_contract_attestation_data(attestation_type type,
+                                                            uint8_t *nonce,
+                                                            uint8_t *wallet_signature,
+                                                            const std::string &http_timestamp,
+                                                            int32_t comparison_value,
+                                                            int32_t unix_timestamp,
+                                                            const std::string &certificate_chain)
+{
+    if (type == kMinimumBalanceAttestation)
+        DEBUG_LOG("Serializing minimum balance attestation data.");
+    else if (type == kConsistentIncomeAttestation)
+        DEBUG_LOG("Serializing consistent income attestation data.");
+    else if (type == kStableIncomeAttestation)
+        DEBUG_LOG("Serializing stable income attestation data.");
+    else
+        THROW_EXCEPTION(kSigningError, "Invalid attestation type");
+
+    std::vector<uint8_t> attestation_data(155 + certificate_chain.length(), 0);
+    auto cursor = attestation_data.begin();
+
+    uint16_t type_uint = static_cast<uint16_t>(type);
+    std::memcpy(&*cursor, &type_uint, 2);
+    std::advance(cursor, 2);
+
+    std::copy(nonce, nonce + 16, cursor);
+    std::advance(cursor, 16);
+
+    std::copy(wallet_signature, wallet_signature + 65, cursor);
+    std::advance(cursor, 65);
+
+    if (http_timestamp.length() > 63)
+        THROW_EXCEPTION(kSigningDataFieldTooLong, "HTTP timestamp longer than 63 chars");
+    std::copy(http_timestamp.begin(), http_timestamp.end(), cursor);
+    std::advance(cursor, 64);
+
+    std::memcpy(&*cursor, &comparison_value, 4);
+    std::advance(cursor, 4);
+
+    std::memcpy(&*cursor, &unix_timestamp, 4);
+    std::advance(cursor, 4);
+
+    std::copy(certificate_chain.begin(), certificate_chain.end(), cursor);
+
+    DEBUG_HEX_LOG("Attestation data", attestation_data.data(), (int)attestation_data.size());
+
+    return attestation_data;
+}
+
 std::vector<uint8_t>
 create_plaid_account_ownership_attestation_data(uint8_t *nonce,
                                                 const std::string &http_timestamp,

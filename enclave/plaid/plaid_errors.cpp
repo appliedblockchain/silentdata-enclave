@@ -16,12 +16,9 @@ core_status_code parse_plaid_error(HTTPSResponse response)
     try
     {
         ERROR_LOG("Plaid Error:\n%s", response.get_body().c_str());
-        std::map<std::string, jsmntype_t> error_keys = {{"error_type", JSMN_STRING},
-                                                        {"error_code", JSMN_STRING}};
-        JSONParser error_parser(response.get_body(), 20);
-        JSONData error_data = error_parser.get_data_from_keys(error_keys);
-        std::string error_type = error_data.get("error_type");
-        std::string error_code = error_data.get("error_code");
+        json::JSON error_data = json::JSON::Load(response.get_body());
+        std::string error_type = error_data["error_type"].ToString();
+        std::string error_code = error_data["error_code"].ToString();
         if (error_type == "API_ERROR")
             return kPlaidApiError;
         if (error_type == "INSTITUTION_ERROR")

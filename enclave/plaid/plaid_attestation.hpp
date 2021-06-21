@@ -36,6 +36,15 @@ std::vector<uint8_t> create_plaid_attestation_data(attestation_type type,
                                                    int32_t unix_timestamp,
                                                    const std::string &certificate_chain);
 
+// Create a padded structure of the attestation data for contracts
+std::vector<uint8_t> create_plaid_contract_attestation_data(attestation_type type,
+                                                            uint8_t *nonce,
+                                                            uint8_t *wallet_signature,
+                                                            const std::string &http_timestamp,
+                                                            int32_t comparison_value,
+                                                            int32_t unix_timestamp,
+                                                            const std::string &certificate_chain);
+
 std::vector<uint8_t>
 create_plaid_account_ownership_attestation_data(uint8_t *nonce,
                                                 const std::string &http_timestamp,

@@ -12,11 +12,25 @@ enclave {
         int32_t minimum_balance;
     };
 
+    struct plaid_minimum_balance_contract_attestation_data {
+        char nonce[16];
+        char timestamp[64];
+        char wallet_signature[65];
+        int32_t minimum_balance;
+    };
+
     struct plaid_consistent_income_attestation_data {
         char nonce[16];
         char timestamp[64];
         char account_holder_name[128];
         char institution_name[128];
+        int32_t consistent_income;
+    };
+
+    struct plaid_consistent_income_contract_attestation_data {
+        char nonce[16];
+        char timestamp[64];
+        char wallet_signature[65];
         int32_t consistent_income;
     };
 
@@ -58,6 +72,20 @@ enclave {
             [out, size=384] uint8_t* signature,
             [out] enum access_token_status* access_status);
 
+        public enum core_status_code plaid_minimum_balance_contract_attestation(
+            [in, string] const char* client_id,
+            [in, string] const char* secret,
+            [in, string] const char* plaid_environment,
+            [in, size=64] uint8_t* client_public_key,
+            [in, size=16] uint8_t* nonce,
+            int32_t minimum_balance,
+            int32_t client_timestamp,
+            [in, size=149] uint8_t* encrypted_input,
+            [out] struct plaid_minimum_balance_contract_attestation_data* attestation,
+            [out, size=10000] char* certificate_chain,
+            [out, size=384] uint8_t* signature,
+            [out] enum access_token_status* access_status);
+
         public enum core_status_code plaid_consistent_income_attestation(
             [in, string] const char* client_id,
             [in, string] const char* secret,
@@ -82,6 +110,34 @@ enclave {
             int32_t client_timestamp,
             [in, size=84] uint8_t* encrypted_input,
             [out] struct plaid_consistent_income_attestation_data* attestation,
+            [out, size=10000] char* certificate_chain,
+            [out, size=384] uint8_t* signature,
+            [out] enum access_token_status* access_status);
+
+        public enum core_status_code plaid_consistent_income_contract_attestation(
+            [in, string] const char* client_id,
+            [in, string] const char* secret,
+            [in, string] const char* plaid_environment,
+            [in, size=64] uint8_t* client_public_key,
+            [in, size=16] uint8_t* nonce,
+            int32_t consistent_income,
+            int32_t client_timestamp,
+            [in, size=149] uint8_t* encrypted_input,
+            [out] struct plaid_consistent_income_contract_attestation_data* attestation,
+            [out, size=10000] char* certificate_chain,
+            [out, size=384] uint8_t* signature,
+            [out] enum access_token_status* access_status);
+
+        public enum core_status_code plaid_stable_income_contract_attestation(
+            [in, string] const char* client_id,
+            [in, string] const char* secret,
+            [in, string] const char* plaid_environment,
+            [in, size=64] uint8_t* client_public_key,
+            [in, size=16] uint8_t* nonce,
+            int32_t consistent_income,
+            int32_t client_timestamp,
+            [in, size=149] uint8_t* encrypted_input,
+            [out] struct plaid_consistent_income_contract_attestation_data* attestation,
             [out, size=10000] char* certificate_chain,
             [out, size=384] uint8_t* signature,
             [out] enum access_token_status* access_status);

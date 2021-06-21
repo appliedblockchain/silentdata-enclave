@@ -158,14 +158,10 @@ core_status_code plaid_get_link_token(const char *client_id,
     }
 
     // Configure the Plaid options
-    PlaidConfiguration plaid_config;
-    plaid_config.client_id = client_id;
-    plaid_config.secret = secret;
-    plaid_config.environment = plaid_environment;
+    PlaidConfiguration plaid_config(plaid_environment, client_id, secret);
 
     // Configure the HTTPS client options
     ClientOptions opt;
-    opt.debug_level = 1;
     opt.server_port = "443";
     opt.close_session = true;
     opt.timestamp = client_timestamp;
@@ -217,6 +213,146 @@ core_status_code plaid_get_link_token(const char *client_id,
 //         - certificate_chain = The certificate chain for Plaid
 //         - signature = attestation + certificate chain signed with private key
 //         - access_status = Whether the access token has been destroyed correctly
+
+struct BalanceAttestationResult
+{
+    core_status_code status;
+    std::string timestamp;
+    std::string account_holder_name;
+    std::string institution_name;
+    std::array<uint8_t, 65> wallet_signature;
+    std::string certificate_chain;
+};
+
+BalanceAttestationResult plaid_balance_attestation(const char *client_id,
+                                                   const char *secret,
+                                                   const char *plaid_environment,
+                                                   uint8_t *client_public_key_bytes,
+                                                   uint8_t *nonce,
+                                                   int32_t minimum_balance,
+                                                   bool contract,
+                                                   int32_t client_timestamp,
+                                                   uint8_t *encrypted_input,
+                                                   access_token_status *access_status)
+{
+    BalanceAttestationResult result;
+    result.status = kUnknownError;
+
+    *access_status = kAccessTokenNotCreated;
+
+    sgx_aes_gcm_128bit_key_t sym_key;
+    ecdh(&enc_key_pair.private_key, client_public_key_bytes, sym_key);
+
+    // Construct additional authenticated data
+    std::array<uint8_t, 16 + 4 + 4> aad{};
+    std::memcpy(aad.data(), nonce, 16);
+    std::memcpy(aad.data() + 16, &minimum_balance, 4);
+    std::memcpy(aad.data() + 16 + 4, &client_timestamp, 4);
+
+    // Decrypt public token (and wallet signature if this is a contract attestation)
+    std::array<uint8_t, 56> public_token{};
+    std::array<uint8_t, 65> wallet_signature{};
+    sgx_status_t ret;
+    if (contract)
+    {
+        std::array<uint8_t, 121> decrypted_data{};
+        ret = aes_decrypt(
+            sym_key, encrypted_input, 121, aad.data(), aad.size(), decrypted_data.data());
+        if (ret == SGX_SUCCESS)
+        {
+            std::memcpy(public_token.data(), decrypted_data.data(), 56);
+            std::memcpy(wallet_signature.data(), decrypted_data.data() + 56, 65);
+        }
+    }
+    else
+    {
+        ret =
+            aes_decrypt(sym_key, encrypted_input, 56, aad.data(), aad.size(), public_token.data());
+    }
+    if (ret != SGX_SUCCESS)
+    {
+        ERROR_LOG("Decryption failed: %s", sgx_error_message("aes_decrypt", ret).c_str());
+        THROW_EXCEPTION(sgx_error_status(ret), "Decryption failed");
+    }
+
+    // Configure the Plaid options
+    PlaidConfiguration plaid_config(plaid_environment, client_id, secret);
+
+    // Configure the HTTPS client
+    ClientOptions opt;
+    opt.server_port = "443";
+    opt.timestamp = client_timestamp;
+    std::string host = plaid_environment + std::string(".plaid.com");
+    std::vector<std::string> certificates{plaid_certificate};
+    HTTPSClient client(host.c_str(), opt, certificates);
+
+    //
+    //  Access token request
+    //
+    PlaidAccess access;
+    access = plaid_get_access(client, plaid_config, reinterpret_cast<char *>(public_token.data()));
+    *access_status = kAccessTokenCreated;
+    plaid_config.access_token = access.token;
+
+    //
+    //  Account balance request
+    //
+    double balance;
+    try
+    {
+        balance = plaid_get_total_balance(client, plaid_config);
+    }
+    catch (const EnclaveException &e)
+    {
+        *access_status = plaid_destroy_access(client, plaid_config);
+        throw e;
+    }
+
+    // Do the attestation
+    if (balance < static_cast<double>(minimum_balance))
+    {
+        *access_status = plaid_destroy_access(client, plaid_config);
+        WARNING_LOG("Minimum account balance requirements not met");
+        result.status = kMinimumBalanceRequirementsNotMet;
+        return result;
+    }
+
+    //
+    // Account holder name and institution name requests
+    //
+    std::string account_holder_name;
+    std::string institution_name;
+    try
+    {
+        account_holder_name = plaid_get_account_holder_name(client, plaid_config);
+        institution_name = plaid_get_institution_name(client, plaid_config);
+    }
+    catch (const EnclaveException &e)
+    {
+        *access_status = plaid_destroy_access(client, plaid_config);
+        throw e;
+    }
+
+    //
+    // Access (and public) token destruction request
+    //
+    *access_status = plaid_destroy_access(client, plaid_config);
+    if (*access_status == kAccessTokenNotDestroyed)
+        THROW_EXCEPTION(kPlaidTokenDestructionError, "Failed to destroy the Plaid access token");
+
+    //
+    // Attestation data and signature verification
+    //
+    result.timestamp = access.timestamp;
+    result.account_holder_name = account_holder_name;
+    result.institution_name = institution_name;
+    result.wallet_signature = wallet_signature;
+    result.certificate_chain = access.certificate_chain;
+    result.status = kSuccess;
+
+    return result;
+}
+
 core_status_code
 plaid_minimum_balance_attestation(const char *client_id,
                                   const char *secret,
@@ -242,12 +378,19 @@ plaid_minimum_balance_attestation(const char *client_id,
 
     // Initialise padded struct
     std::memset(attestation, 0, sizeof(plaid_minimum_balance_attestation_data));
-    *access_status = kAccessTokenNotCreated;
-
-    sgx_aes_gcm_128bit_key_t sym_key;
+    BalanceAttestationResult result;
     try
     {
-        ecdh(&enc_key_pair.private_key, client_public_key_bytes, sym_key);
+        result = plaid_balance_attestation(client_id,
+                                           secret,
+                                           plaid_environment,
+                                           client_public_key_bytes,
+                                           nonce,
+                                           minimum_balance,
+                                           false,
+                                           client_timestamp,
+                                           encrypted_input,
+                                           access_status);
     }
     catch (const EnclaveException &e)
     {
@@ -256,119 +399,24 @@ plaid_minimum_balance_attestation(const char *client_id,
     }
     catch (...)
     {
-        ERROR_LOG("ECDH failed");
-        return kECDHError;
+        return kUnknownError;
     }
-
-    // Construct additional authenticated data
-    std::array<uint8_t, 16 + 4 + 4> aad{};
-    std::memcpy(aad.data(), nonce, 16);
-    std::memcpy(aad.data() + 16, &minimum_balance, 4);
-    std::memcpy(aad.data() + 16 + 4, &client_timestamp, 4);
-
-    // Decrypt public token
-    std::array<uint8_t, 56> public_token{};
-    sgx_status_t ret;
-    if ((ret = aes_decrypt(
-             sym_key, encrypted_input, 56, aad.data(), aad.size(), public_token.data())) !=
-        SGX_SUCCESS)
-    {
-        ERROR_LOG("Decryption failed: %s", sgx_error_message("aes_decrypt", ret).c_str());
-        return sgx_error_status(ret);
-    }
-
-    // Configure the Plaid options
-    PlaidConfiguration plaid_config;
-    plaid_config.client_id = client_id;
-    plaid_config.secret = secret;
-    plaid_config.environment = plaid_environment;
-
-    // Configure the HTTPS client
-    ClientOptions opt;
-    opt.debug_level = 1;
-    opt.server_port = "443";
-    opt.timestamp = client_timestamp;
-    std::string host = plaid_environment + std::string(".plaid.com");
-    std::vector<std::string> certificates{plaid_certificate};
-    HTTPSClient client(host.c_str(), opt, certificates);
-
-    //
-    //  Access token request
-    //
-    PlaidAccess access;
-    try
-    {
-        access =
-            plaid_get_access(client, plaid_config, reinterpret_cast<char *>(public_token.data()));
-    }
-    catch (const EnclaveException &e)
-    {
-        EXCEPTION_LOG(e);
-        return e.get_code();
-    }
-    *access_status = kAccessTokenCreated;
-    plaid_config.access_token = access.token;
-
-    //
-    //  Account balance request
-    //
-    float balance;
-    try
-    {
-        balance = plaid_get_total_balance(client, plaid_config);
-    }
-    catch (const EnclaveException &e)
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        EXCEPTION_LOG(e);
-        return e.get_code();
-    }
-
-    // Do the attestation
-    if (balance < (float)minimum_balance)
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        WARNING_LOG("Minimum account balance requirements not met");
-        return kMinimumBalanceRequirementsNotMet;
-    }
-
-    //
-    //  Account holder name and institution name requests
-    //
-    std::string account_holder_name;
-    std::string institution_name;
-    try
-    {
-        account_holder_name = plaid_get_account_holder_name(client, plaid_config);
-        institution_name = plaid_get_institution_name(client, plaid_config);
-    }
-    catch (const EnclaveException &e)
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        EXCEPTION_LOG(e);
-        return e.get_code();
-    }
-
-    //
-    // Access (and public) token destruction request
-    //
-    *access_status = plaid_destroy_access(client, plaid_config);
-    if (*access_status == kAccessTokenNotDestroyed)
-    {
-        ERROR_LOG("Failed to destroy the Plaid access token");
-        return kPlaidTokenDestructionError;
-    }
+    if (result.status != kSuccess)
+        return result.status;
 
     //
     // Attestation data and signature verification
     //
     memcpy(attestation->nonce, nonce, 16);
-    std::copy(access.timestamp.begin(), access.timestamp.end(), attestation->timestamp);
-    std::copy(
-        account_holder_name.begin(), account_holder_name.end(), attestation->account_holder_name);
-    std::copy(institution_name.begin(), institution_name.end(), attestation->institution_name);
+    std::copy(result.timestamp.begin(), result.timestamp.end(), attestation->timestamp);
+    std::copy(result.account_holder_name.begin(),
+              result.account_holder_name.end(),
+              attestation->account_holder_name);
+    std::copy(result.institution_name.begin(),
+              result.institution_name.end(),
+              attestation->institution_name);
     attestation->minimum_balance = minimum_balance;
-    std::copy(access.certificate_chain.begin(), access.certificate_chain.end(), certificate_chain);
+    std::copy(result.certificate_chain.begin(), result.certificate_chain.end(), certificate_chain);
 
     sgx_rsa3072_signature_t sig;
     try
@@ -376,12 +424,96 @@ plaid_minimum_balance_attestation(const char *client_id,
         std::vector<uint8_t> attestation_data =
             create_plaid_attestation_data(kMinimumBalanceAttestation,
                                           nonce,
-                                          access.timestamp,
-                                          account_holder_name,
-                                          institution_name,
+                                          result.timestamp,
+                                          result.account_holder_name,
+                                          result.institution_name,
                                           minimum_balance,
                                           client_timestamp,
-                                          access.certificate_chain);
+                                          result.certificate_chain);
+        rsa_sign(sig_rsa_params, attestation_data, sig);
+    }
+    catch (const EnclaveException &e)
+    {
+        EXCEPTION_LOG(e);
+        return e.get_code();
+    }
+    memcpy(signature, sig, 384);
+    return kSuccess;
+}
+
+core_status_code plaid_minimum_balance_contract_attestation(
+    const char *client_id,
+    const char *secret,
+    const char *plaid_environment,
+    uint8_t *client_public_key_bytes,
+    uint8_t *nonce,
+    int32_t minimum_balance,
+    int32_t client_timestamp,
+    uint8_t *encrypted_input,
+    plaid_minimum_balance_contract_attestation_data *attestation,
+    char *certificate_chain,
+    uint8_t *signature,
+    access_token_status *access_status)
+{
+    // Validate function argument pointers
+    if (client_id == nullptr || secret == nullptr || plaid_environment == nullptr ||
+        nonce == nullptr || encrypted_input == nullptr || attestation == nullptr ||
+        certificate_chain == nullptr || signature == nullptr || access_status == nullptr)
+    {
+        ERROR_LOG("One or more of the function argument pointers is NULL");
+        return kInvalidInput;
+    }
+
+    // Initialise padded struct
+    std::memset(attestation, 0, sizeof(plaid_minimum_balance_contract_attestation_data));
+    BalanceAttestationResult result;
+    try
+    {
+        result = plaid_balance_attestation(client_id,
+                                           secret,
+                                           plaid_environment,
+                                           client_public_key_bytes,
+                                           nonce,
+                                           minimum_balance,
+                                           true,
+                                           client_timestamp,
+                                           encrypted_input,
+                                           access_status);
+    }
+    catch (const EnclaveException &e)
+    {
+        EXCEPTION_LOG(e);
+        return e.get_code();
+    }
+    catch (...)
+    {
+        return kUnknownError;
+    }
+    if (result.status != kSuccess)
+        return result.status;
+
+    //
+    // Attestation data and signature verification
+    //
+    memcpy(attestation->nonce, nonce, 16);
+    std::copy(result.timestamp.begin(), result.timestamp.end(), attestation->timestamp);
+    std::copy(result.wallet_signature.begin(),
+              result.wallet_signature.end(),
+              attestation->wallet_signature);
+    attestation->minimum_balance = minimum_balance;
+    std::copy(result.certificate_chain.begin(), result.certificate_chain.end(), certificate_chain);
+
+    sgx_rsa3072_signature_t sig;
+    try
+    {
+        std::vector<uint8_t> attestation_data =
+            create_plaid_contract_attestation_data(kMinimumBalanceAttestation,
+                                                   nonce,
+                                                   result.wallet_signature.data(),
+                                                   result.timestamp,
+                                                   minimum_balance,
+                                                   client_timestamp,
+                                                   result.certificate_chain);
         rsa_sign(sig_rsa_params, attestation_data, sig);
     }
     catch (const EnclaveException &e)
@@ -407,6 +539,150 @@ plaid_minimum_balance_attestation(const char *client_id,
 //         - certificate_chain = The certificate chain for Plaid
 //         - signature = attestation + certificate chain signed with private key
 //         - access_status = Whether the access token has been destroyed correctly
+
+struct IncomeAttestationResult
+{
+    core_status_code status;
+    std::string timestamp;
+    std::string account_holder_name;
+    std::string institution_name;
+    std::array<uint8_t, 65> wallet_signature;
+    std::string certificate_chain;
+};
+
+IncomeAttestationResult plaid_income_attestation(const char *client_id,
+                                                 const char *secret,
+                                                 const char *plaid_environment,
+                                                 uint8_t *client_public_key_bytes,
+                                                 uint8_t *nonce,
+                                                 int32_t consistent_income,
+                                                 bool stable,
+                                                 bool contract,
+                                                 int32_t client_timestamp,
+                                                 uint8_t *encrypted_input,
+                                                 access_token_status *access_status)
+{
+    IncomeAttestationResult result;
+    result.status = kUnknownError;
+
+    *access_status = kAccessTokenNotCreated;
+
+    sgx_aes_gcm_128bit_key_t sym_key;
+    ecdh(&enc_key_pair.private_key, client_public_key_bytes, sym_key);
+
+    // Construct additional authenticated data
+    std::array<uint8_t, 16 + 4 + 4> aad{};
+    std::memcpy(aad.data(), nonce, 16);
+    std::memcpy(aad.data() + 16, &consistent_income, 4);
+    std::memcpy(aad.data() + 16 + 4, &client_timestamp, 4);
+
+    // Decrypt public token
+    std::array<uint8_t, 56> public_token{};
+    std::array<uint8_t, 65> wallet_signature{};
+    sgx_status_t ret;
+    if (contract)
+    {
+        std::array<uint8_t, 121> decrypted_data{};
+        ret = aes_decrypt(
+            sym_key, encrypted_input, 121, aad.data(), aad.size(), decrypted_data.data());
+        if (ret == SGX_SUCCESS)
+        {
+            std::memcpy(public_token.data(), decrypted_data.data(), 56);
+            std::memcpy(wallet_signature.data(), decrypted_data.data() + 56, 65);
+        }
+    }
+    else
+    {
+        ret =
+            aes_decrypt(sym_key, encrypted_input, 56, aad.data(), aad.size(), public_token.data());
+    }
+    if (ret != SGX_SUCCESS)
+    {
+        ERROR_LOG("Decryption failed: %s", sgx_error_message("aes_decrypt", ret).c_str());
+        THROW_EXCEPTION(sgx_error_status(ret), "Decryption failed");
+    }
+
+    // Configure the Plaid options
+    PlaidConfiguration plaid_config(plaid_environment, client_id, secret);
+
+    // Configure the HTTPS client
+    ClientOptions opt;
+    opt.server_port = "443";
+    opt.timestamp = client_timestamp;
+    std::string host = plaid_environment + std::string(".plaid.com");
+    std::vector<std::string> certificates{plaid_certificate};
+    HTTPSClient client(host.c_str(), opt, certificates);
+
+    //
+    //  Access token request
+    //
+    PlaidAccess access;
+    access = plaid_get_access(client, plaid_config, reinterpret_cast<char *>(public_token.data()));
+    *access_status = kAccessTokenCreated;
+    plaid_config.access_token = access.token;
+
+    //
+    //  Account income request
+    //
+    // Get a date range spanning the previous 3 full months
+    struct tm start_date = {};
+    struct tm end_date = {};
+    std::vector<PlaidTransaction> transactions;
+    try
+    {
+        end_date = http_date_to_tm(access.timestamp);
+        start_date = subtract_tm_months(end_date, 3);
+        transactions = plaid_get_all_transactions(client, plaid_config, start_date, end_date);
+    }
+    catch (const EnclaveException &e)
+    {
+        *access_status = plaid_destroy_access(client, plaid_config);
+        throw e;
+    }
+
+    if ((stable &&
+         !plaid_check_stable_income(transactions, start_date, end_date, consistent_income)) ||
+        (!stable && !plaid_check_income(transactions, start_date, end_date, consistent_income)))
+    {
+        *access_status = plaid_destroy_access(client, plaid_config);
+        WARNING_LOG("Consistent stable income requirements were not met");
+        result.status = kConsistentIncomeRequirementsNotMet;
+        return result;
+    }
+
+    //
+    //  Account holder name and institution name requests
+    //
+    std::string account_holder_name;
+    std::string institution_name;
+    try
+    {
+        account_holder_name = plaid_get_account_holder_name(client, plaid_config);
+        institution_name = plaid_get_institution_name(client, plaid_config);
+    }
+    catch (const EnclaveException &e)
+    {
+        *access_status = plaid_destroy_access(client, plaid_config);
+        throw e;
+    }
+
+    //
+    // Access (and public) token destruction request
+    //
+    *access_status = plaid_destroy_access(client, plaid_config);
+    if (*access_status == kAccessTokenNotDestroyed)
+        THROW_EXCEPTION(kPlaidTokenDestructionError, "Failed to destroy the Plaid access token");
+
+    result.timestamp = access.timestamp;
+    result.account_holder_name = account_holder_name;
+    result.institution_name = institution_name;
+    result.wallet_signature = wallet_signature;
+    result.certificate_chain = access.certificate_chain;
+    result.status = kSuccess;
+
+    return result;
+}
+
 core_status_code plaid_income_attestation(const char *client_id,
                                           const char *secret,
                                           const char *plaid_environment,
@@ -432,12 +708,21 @@ core_status_code plaid_income_attestation(const char *client_id,
 
     // Initialise padded struct
     std::memset(attestation, 0, sizeof(plaid_consistent_income_attestation_data));
-    *access_status = kAccessTokenNotCreated;
+    IncomeAttestationResult result;
 
-    sgx_aes_gcm_128bit_key_t sym_key;
     try
     {
-        ecdh(&enc_key_pair.private_key, client_public_key_bytes, sym_key);
+        result = plaid_income_attestation(client_id,
+                                          secret,
+                                          plaid_environment,
+                                          client_public_key_bytes,
+                                          nonce,
+                                          consistent_income,
+                                          stable,
+                                          false,
+                                          client_timestamp,
+                                          encrypted_input,
+                                          access_status);
     }
     catch (const EnclaveException &e)
     {
@@ -446,139 +731,24 @@ core_status_code plaid_income_attestation(const char *client_id,
     }
     catch (...)
     {
-        ERROR_LOG("ECDH failed");
-        return kECDHError;
+        return kUnknownError;
     }
-
-    // Construct additional authenticated data
-    std::array<uint8_t, 16 + 4 + 4> aad{};
-    std::memcpy(aad.data(), nonce, 16);
-    std::memcpy(aad.data() + 16, &consistent_income, 4);
-    std::memcpy(aad.data() + 16 + 4, &client_timestamp, 4);
-
-    // Decrypt public token
-    std::array<uint8_t, 56> public_token{};
-    sgx_status_t ret;
-    if ((ret = aes_decrypt(
-             sym_key, encrypted_input, 56, aad.data(), aad.size(), public_token.data())) !=
-        SGX_SUCCESS)
-    {
-        ERROR_LOG("Decryption failed: %s", sgx_error_message("aes_decrypt", ret).c_str());
-        return sgx_error_status(ret);
-    }
-
-    // Configure the Plaid options
-    PlaidConfiguration plaid_config;
-    plaid_config.client_id = client_id;
-    plaid_config.secret = secret;
-    plaid_config.environment = plaid_environment;
-
-    // Configure the HTTPS client
-    ClientOptions opt;
-    opt.debug_level = 1;
-    opt.server_port = "443";
-    opt.timestamp = client_timestamp;
-    std::string host = plaid_environment + std::string(".plaid.com");
-    std::vector<std::string> certificates{plaid_certificate};
-    HTTPSClient client(host.c_str(), opt, certificates);
-
-    //
-    //  Access token request
-    //
-    PlaidAccess access;
-    try
-    {
-        access =
-            plaid_get_access(client, plaid_config, reinterpret_cast<char *>(public_token.data()));
-    }
-    catch (const EnclaveException &e)
-    {
-        EXCEPTION_LOG(e);
-        return e.get_code();
-    }
-    *access_status = kAccessTokenCreated;
-    plaid_config.access_token = access.token;
-
-    //
-    //  Account income request
-    //
-    // Get a date range spanning the previous 3 full months
-    struct tm start_date = {};
-    struct tm end_date = {};
-    try
-    {
-        end_date = http_date_to_tm(access.timestamp);
-        start_date = subtract_tm_months(end_date, 3);
-    }
-    catch (const EnclaveException &e)
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        EXCEPTION_LOG(e);
-        return e.get_code();
-    }
-
-    std::vector<PlaidTransaction> transactions;
-    try
-    {
-        transactions = plaid_get_all_transactions(client, plaid_config, start_date, end_date);
-    }
-    catch (const EnclaveException &e)
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        EXCEPTION_LOG(e);
-        return e.get_code();
-    }
-
-    if (stable && !plaid_check_stable_income(transactions, start_date, end_date, consistent_income))
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        WARNING_LOG("Consistent stable income requirements were not met");
-        return kConsistentIncomeRequirementsNotMet;
-    }
-    else if (!stable && !plaid_check_income(transactions, start_date, end_date, consistent_income))
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        WARNING_LOG("Consistent income requirements were not met");
-        return kConsistentIncomeRequirementsNotMet;
-    }
-
-    //
-    //  Account holder name and institution name requests
-    //
-    std::string account_holder_name;
-    std::string institution_name;
-    try
-    {
-        account_holder_name = plaid_get_account_holder_name(client, plaid_config);
-        institution_name = plaid_get_institution_name(client, plaid_config);
-    }
-    catch (const EnclaveException &e)
-    {
-        *access_status = plaid_destroy_access(client, plaid_config);
-        EXCEPTION_LOG(e);
-        return e.get_code();
-    }
-
-    //
-    // Access (and public) token destruction request
-    //
-    *access_status = plaid_destroy_access(client, plaid_config);
-    if (*access_status == kAccessTokenNotDestroyed)
-    {
-        ERROR_LOG("Failed to destroy the Plaid access token");
-        return kPlaidTokenDestructionError;
-    }
+    if (result.status != kSuccess)
+        return result.status;
 
     //
     // Attestation data and signature verification
     //
     memcpy(attestation->nonce, nonce, 16);
-    std::copy(access.timestamp.begin(), access.timestamp.end(), attestation->timestamp);
-    std::copy(
-        account_holder_name.begin(), account_holder_name.end(), attestation->account_holder_name);
-    std::copy(institution_name.begin(), institution_name.end(), attestation->institution_name);
+    std::copy(result.timestamp.begin(), result.timestamp.end(), attestation->timestamp);
+    std::copy(result.account_holder_name.begin(),
+              result.account_holder_name.end(),
+              attestation->account_holder_name);
+    std::copy(result.institution_name.begin(),
+              result.institution_name.end(),
+              attestation->institution_name);
     attestation->consistent_income = consistent_income;
-    std::copy(access.certificate_chain.begin(), access.certificate_chain.end(), certificate_chain);
+    std::copy(result.certificate_chain.begin(), result.certificate_chain.end(), certificate_chain);
 
     sgx_rsa3072_signature_t sig;
     try
@@ -589,12 +759,12 @@ core_status_code plaid_income_attestation(const char *client_id,
         std::vector<uint8_t> attestation_data =
             create_plaid_attestation_data(type,
                                           nonce,
-                                          access.timestamp,
-                                          account_holder_name,
-                                          institution_name,
+                                          result.timestamp,
+                                          result.account_holder_name,
+                                          result.institution_name,
                                           consistent_income,
                                           client_timestamp,
-                                          access.certificate_chain);
+                                          result.certificate_chain);
         rsa_sign(sig_rsa_params, attestation_data, sig);
     }
     catch (const EnclaveException &e)
@@ -663,6 +833,155 @@ plaid_stable_income_attestation(const char *client_id,
                                     certificate_chain,
                                     signature,
                                     access_status);
+}
+
+core_status_code
+plaid_income_contract_attestation(const char *client_id,
+                                  const char *secret,
+                                  const char *plaid_environment,
+                                  uint8_t *client_public_key_bytes,
+                                  uint8_t *nonce,
+                                  int32_t consistent_income,
+                                  bool stable,
+                                  int32_t client_timestamp,
+                                  uint8_t *encrypted_input,
+                                  plaid_consistent_income_contract_attestation_data *attestation,
+                                  char *certificate_chain,
+                                  uint8_t *signature,
+                                  access_token_status *access_status)
+{
+    // Validate function argument pointers
+    if (client_id == nullptr || secret == nullptr || plaid_environment == nullptr ||
+        nonce == nullptr || encrypted_input == nullptr || attestation == nullptr ||
+        certificate_chain == nullptr || signature == nullptr || access_status == nullptr)
+    {
+        ERROR_LOG("One or more of the function argument pointers is NULL");
+        return kInvalidInput;
+    }
+
+    // Initialise padded struct
+    std::memset(attestation, 0, sizeof(plaid_consistent_income_contract_attestation_data));
+    IncomeAttestationResult result;
+
+    try
+    {
+        result = plaid_income_attestation(client_id,
+                                          secret,
+                                          plaid_environment,
+                                          client_public_key_bytes,
+                                          nonce,
+                                          consistent_income,
+                                          stable,
+                                          true,
+                                          client_timestamp,
+                                          encrypted_input,
+                                          access_status);
+    }
+    catch (const EnclaveException &e)
+    {
+        EXCEPTION_LOG(e);
+        return e.get_code();
+    }
+    catch (...)
+    {
+        return kUnknownError;
+    }
+    if (result.status != kSuccess)
+        return result.status;
+
+    //
+    // Attestation data and signature verification
+    //
+    memcpy(attestation->nonce, nonce, 16);
+    std::copy(result.timestamp.begin(), result.timestamp.end(), attestation->timestamp);
+    std::copy(result.wallet_signature.begin(),
+              result.wallet_signature.end(),
+              attestation->wallet_signature);
+    attestation->consistent_income = consistent_income;
+    std::copy(result.certificate_chain.begin(), result.certificate_chain.end(), certificate_chain);
+
+    sgx_rsa3072_signature_t sig;
+    try
+    {
+        attestation_type type = kConsistentIncomeAttestation;
+        if (stable)
+            type = kStableIncomeAttestation;
+        std::vector<uint8_t> attestation_data =
+            create_plaid_contract_attestation_data(type,
+                                                   nonce,
+                                                   result.wallet_signature.data(),
+                                                   result.timestamp,
+                                                   consistent_income,
+                                                   client_timestamp,
+                                                   result.certificate_chain);
+        rsa_sign(sig_rsa_params, attestation_data, sig);
+    }
+    catch (const EnclaveException &e)
+    {
+        EXCEPTION_LOG(e);
+        return e.get_code();
+    }
+    memcpy(signature, sig, 384);
+
+    return kSuccess;
+}
+
+core_status_code plaid_consistent_income_contract_attestation(
+    const char *client_id,
+    const char *secret,
+    const char *plaid_environment,
+    uint8_t *client_public_key_bytes,
+    uint8_t *nonce,
+    int32_t consistent_income,
+    int32_t client_timestamp,
+    uint8_t *encrypted_input,
+    plaid_consistent_income_contract_attestation_data *attestation,
+    char *certificate_chain,
+    uint8_t *signature,
+    access_token_status *access_status)
+{
+    return plaid_income_contract_attestation(client_id,
+                                             secret,
+                                             plaid_environment,
+                                             client_public_key_bytes,
+                                             nonce,
+                                             consistent_income,
+                                             false,
+                                             client_timestamp,
+                                             encrypted_input,
+                                             attestation,
+                                             certificate_chain,
+                                             signature,
+                                             access_status);
+}
+
+core_status_code plaid_stable_income_contract_attestation(
+    const char *client_id,
+    const char *secret,
+    const char *plaid_environment,
+    uint8_t *client_public_key_bytes,
+    uint8_t *nonce,
+    int32_t consistent_income,
+    int32_t client_timestamp,
+    uint8_t *encrypted_input,
+    plaid_consistent_income_contract_attestation_data *attestation,
+    char *certificate_chain,
+    uint8_t *signature,
+    access_token_status *access_status)
+{
+    return plaid_income_contract_attestation(client_id,
+                                             secret,
+                                             plaid_environment,
+                                             client_public_key_bytes,
+                                             nonce,
+                                             consistent_income,
+                                             true,
+                                             client_timestamp,
+                                             encrypted_input,
+                                             attestation,
+                                             certificate_chain,
+                                             signature,
+                                             access_status);
 }
 
 // Exchange a public token for an access token and obtain the users account holder name from the
@@ -745,14 +1064,10 @@ plaid_account_ownership_attestation(const char *client_id,
     }
 
     // Configure the Plaid options
-    PlaidConfiguration plaid_config;
-    plaid_config.client_id = client_id;
-    plaid_config.secret = secret;
-    plaid_config.environment = plaid_environment;
+    PlaidConfiguration plaid_config(plaid_environment, client_id, secret);
 
     // Configure the HTTPS client
     ClientOptions opt;
-    opt.debug_level = 1;
     opt.server_port = "443";
     opt.timestamp = client_timestamp;
     std::string host = plaid_environment + std::string(".plaid.com");

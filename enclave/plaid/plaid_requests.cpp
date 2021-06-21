@@ -1,5 +1,7 @@
 #include "enclave/plaid/plaid_requests.hpp"
 
+using json::JSON;
+
 namespace
 {
 
@@ -13,7 +15,6 @@ std::vector<PlaidTransaction> plaid_get_transactions(HTTPSClient &client,
                                                      int &total)
 {
     error_code = kSuccess;
-    int max_tokens = 12000;
 
     DEBUG_LOG("Sending /transactions/get POST request to Plaid");
     std::vector<PlaidTransaction> transactions;
@@ -22,7 +23,6 @@ std::vector<PlaidTransaction> plaid_get_transactions(HTTPSClient &client,
     if (!response.is_valid())
     {
         opt.output_length = 2 * opt.output_length;
-        max_tokens = 2 * max_tokens;
         response = client.post("/transactions/get", headers, body, opt);
     }
     if (!response.is_valid())
@@ -37,25 +37,13 @@ std::vector<PlaidTransaction> plaid_get_transactions(HTTPSClient &client,
         }
         return transactions;
     }
-    std::map<std::string, jsmntype_t> keys = {{"total_transactions", JSMN_PRIMITIVE},
-                                              {"transactions->amount", JSMN_PRIMITIVE},
-                                              {"transactions->date", JSMN_STRING},
-                                              {"transactions->name", JSMN_STRING}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
+    JSON data = JSON::Load(response.get_body());
 
     // It's possible for there to be no transactions in the first 30 days (as we ignore the current
     // month), check if this is the case and return an empty vector if so
-    try
-    {
-        total = std::stoi(data.get("total_transactions"));
-    }
-    catch (const EnclaveException &e)
-    {
-        EXCEPTION_LOG(e);
-        THROW_EXCEPTION(e.get_code(), "Could not parse JSON body of transaction response");
-    }
-    catch (...)
+    bool is_int = false;
+    total = static_cast<int>(data["total_transactions"].ToInt(is_int));
+    if (!is_int)
     {
         THROW_EXCEPTION(kJSONParseError, "Could not convert total transactions to integer");
     }
@@ -65,44 +53,20 @@ std::vector<PlaidTransaction> plaid_get_transactions(HTTPSClient &client,
         return transactions;
     }
 
-    if (!parser.is_valid())
-        THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body of transaction response");
-    std::vector<std::string> amounts = data.get_all("transactions->amount");
-    std::vector<std::string> dates = data.get_all("transactions->date");
-    std::vector<std::string> names = data.get_all("transactions->name");
+    int n_transactions = data["transactions"].length();
     // Get the transactions of all associated accounts
-    for (size_t i = 0; i < amounts.size(); i++)
+    for (int i = 0; i < n_transactions; i++)
     {
-        struct tm date = {};
-        try
-        {
-            // tm_year is year since 1900
-            date.tm_year = std::stoi(dates[i].substr(0, 4)) - 1900;
-            // tm_mon is month since January
-            date.tm_mon = std::stoi(dates[i].substr(5, 2)) - 1;
-            date.tm_mday = std::stoi(dates[i].substr(8, 2));
-        }
-        catch (...)
-        {
-            THROW_EXCEPTION(kJSONParseError, "Could not convert date to integer");
-        }
-        // Shouldn't have any null values, throw error
-        if (amounts[i].size() <= 0)
-            THROW_EXCEPTION(kJSONParseError, "No amount found in transaction");
-        // JSMN_PRIMITIVE can only be a number, boolean (true/false) or null
-        if (amounts[i].c_str()[0] == 'n' || amounts[i].c_str()[0] == 't' ||
-            amounts[i].c_str()[0] == 'f')
-            THROW_EXCEPTION(kJSONParseError, "Null value in transaction amount");
-        double amount;
-        try
-        {
-            amount = -std::stof(amounts[i]);
-        }
-        catch (...)
-        {
-            THROW_EXCEPTION(kJSONParseError, "Could not convert amount to float");
-        }
-        PlaidTransaction transaction(amount, date, names[i]);
+        std::string date_str = data["transactions"][i]["date"].ToString();
+        struct tm date = plaid_date_to_tm(date_str);
+
+        bool is_float = false;
+        double amount = data["transactions"][i]["amount"].ToFloat(is_float);
+        if (!is_float)
+            amount = static_cast<double>(data["transactions"][i]["amount"].ToInt());
+        std::string name = data["transactions"][i]["name"].ToString();
+        // Negative transactions mean money coming in to the account
+        PlaidTransaction transaction(-amount, date, name);
         transactions.push_back(transaction);
     }
     return transactions;
@@ -155,13 +119,13 @@ PlaidLink plaid_create_link_token(HTTPSClient &client,
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request = json::Object();
+    JSON request = json::Object();
     request["client_id"] = config.client_id;
     request["secret"] = config.secret;
     request["client_name"] = "SILENTDATA";
     request["country_codes"] = json::Array("GB");
     request["language"] = "en";
-    json::JSON user = json::Object();
+    JSON user = json::Object();
     user["client_user_id"] = client_user_id;
     request["user"] = user;
     request["products"] = json::Array("identity");
@@ -179,19 +143,19 @@ PlaidLink plaid_create_link_token(HTTPSClient &client,
         THROW_ERROR_CODE(error_code);
     }
 
-    // Obtain key value pairs from the response
-    int max_tokens = 7;
-    std::map<std::string, jsmntype_t> keys = {
-        {"link_token", JSMN_STRING}, {"expiration", JSMN_STRING}, {"request_id", JSMN_STRING}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
-    if (!parser.is_valid())
-        THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body");
+    JSON data = JSON::Load(response.get_body());
 
     PlaidLink link;
-    link.token = data.get("link_token");
-    link.expiration = data.get("expiration");
-    link.request_id = data.get("request_id");
+    bool is_string = false;
+    link.token = data["link_token"].ToString(is_string);
+    if (!is_string)
+        THROW_EXCEPTION(kJSONParseError, "Could not parse link token from JSON body");
+    link.expiration = data["expiration"].ToString(is_string);
+    if (!is_string)
+        THROW_EXCEPTION(kJSONParseError, "Could not parse expiration from JSON body");
+    link.request_id = data["request_id"].ToString(is_string);
+    if (!is_string)
+        THROW_EXCEPTION(kJSONParseError, "Could not parse request id from JSON body");
     return link;
 }
 
@@ -205,7 +169,7 @@ plaid_get_access(HTTPSClient &client, const PlaidConfiguration &config, const ch
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request_body = json::Object();
+    JSON request_body = json::Object();
     request_body["client_id"] = config.client_id;
     request_body["secret"] = config.secret;
     request_body["public_token"] = public_token;
@@ -222,15 +186,13 @@ plaid_get_access(HTTPSClient &client, const PlaidConfiguration &config, const ch
         THROW_ERROR_CODE(error_code);
     }
 
-    int max_tokens = 7;
-    std::map<std::string, jsmntype_t> keys = {{"access_token", JSMN_STRING}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
-    if (!parser.is_valid())
-        THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body");
+    JSON data = JSON::Load(response.get_body());
 
     PlaidAccess access;
-    access.token = data.get("access_token");
+    bool is_string = false;
+    access.token = data["access_token"].ToString(is_string);
+    if (!is_string)
+        THROW_EXCEPTION(kJSONParseError, "Could not parse access token from JSON body");
 
     // Parse the response to get the timestamp
     access.timestamp = response.get_timestamp();
@@ -255,7 +217,7 @@ access_token_status plaid_destroy_access(HTTPSClient &client, const PlaidConfigu
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request_body = json::Object();
+    JSON request_body = json::Object();
     request_body["client_id"] = config.client_id;
     request_body["secret"] = config.secret;
     request_body["access_token"] = config.access_token;
@@ -266,30 +228,26 @@ access_token_status plaid_destroy_access(HTTPSClient &client, const PlaidConfigu
     if (!response.is_valid() || response.get_status_code() != 200)
         return kAccessTokenNotDestroyed;
 
-    int max_tokens = 10;
-    std::map<std::string, jsmntype_t> keys = {{"removed", JSMN_PRIMITIVE}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
-    if (!parser.is_valid())
-        return kAccessTokenNotDestroyed;
-    if (data.get("removed")[0] != 't')
-        return kAccessTokenNotDestroyed;
+    JSON data = JSON::Load(response.get_body());
+    bool is_bool = false;
+    bool is_removed = data["removed"].ToBool(is_bool);
+    if (is_bool && is_removed)
+        return kAccessTokenDestroyed;
 
-    return kAccessTokenDestroyed;
+    return kAccessTokenNotDestroyed;
 }
 
-float plaid_get_total_balance(HTTPSClient &client, const PlaidConfiguration &config)
+double plaid_get_total_balance(HTTPSClient &client, const PlaidConfiguration &config)
 {
     ClientOptions opt = client.get_client_options();
     opt.output_length = 6000;
-    int max_tokens = 500;
 
     std::string host = config.environment + std::string(".plaid.com");
     std::string host_header = "Host: " + host;
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request_body = json::Object();
+    JSON request_body = json::Object();
     request_body["client_id"] = config.client_id;
     request_body["secret"] = config.secret;
     request_body["access_token"] = config.access_token;
@@ -302,7 +260,6 @@ float plaid_get_total_balance(HTTPSClient &client, const PlaidConfiguration &con
     if (!response.is_valid())
     {
         opt.output_length = 2 * opt.output_length;
-        max_tokens = 2 * max_tokens;
         response = client.post("/accounts/balance/get", headers, request_body_str.c_str(), opt);
     }
     if (!response.is_valid())
@@ -313,25 +270,20 @@ float plaid_get_total_balance(HTTPSClient &client, const PlaidConfiguration &con
         THROW_ERROR_CODE(error_code);
     }
 
-    // Parse the response to get the balances of all associated accounts
-    std::map<std::string, jsmntype_t> keys = {{"accounts->balances->available", JSMN_PRIMITIVE}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
-    if (!parser.is_valid())
-        THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body");
-
     // Sum up all of the available balances
-    std::vector<std::string> available_balances = data.get_all("accounts->balances->available");
-    float balance = 0;
-    for (const auto &value : available_balances)
+    JSON data = JSON::Load(response.get_body());
+    int n_accounts = data["accounts"].length();
+    if (n_accounts <= 0)
+        THROW_EXCEPTION(kJSONParseError, "Could not find any bank accounts");
+    double balance = 0;
+    for (int i = 0; i < n_accounts; i++)
     {
-        // Check for null values
-        if (value.size() <= 0)
-            continue;
-        // JSMN_PRIMITIVE can only be a number, boolean (true/false) or null
-        if (value.c_str()[0] == 'n' || value.c_str()[0] == 't' || value.c_str()[0] == 'f')
-            continue;
-        balance += std::stof(value);
+        bool is_float = false;
+        double available_balance = data["accounts"][i]["balances"]["available"].ToFloat(is_float);
+        if (!is_float)
+            available_balance =
+                static_cast<double>(data["accounts"][i]["balances"]["available"].ToInt());
+        balance += available_balance;
     }
 
     return balance;
@@ -361,9 +313,9 @@ std::vector<PlaidTransaction> plaid_get_all_transactions(HTTPSClient &client,
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request_body = json::Object();
+    JSON request_body = json::Object();
     request_body["client_id"] = config.client_id;
-    json::JSON options = json::Object();
+    JSON options = json::Object();
     int count = 50; // Number of transactions to get in one go
     int offset = 0;
     options["count"] = count;
@@ -451,6 +403,7 @@ std::vector<PlaidTransaction> plaid_get_all_transactions(HTTPSClient &client,
     while (transactions.size() < static_cast<size_t>(total_transactions))
     {
         DEBUG_LOG("Not all transactions obtained, getting next page");
+        DEBUG_LOG("Transactions fetched = %i, total = %i", transactions.size(), total_transactions);
         int current_offset = static_cast<int>(request_body["options"]["offset"].ToInt());
         request_body["options"]["offset"] = current_offset + count;
         request_body_str = request_body.dump();
@@ -468,21 +421,20 @@ std::string plaid_get_account_holder_name(HTTPSClient &client,
 {
     ClientOptions opt = client.get_client_options();
     opt.output_length = 22000;
-    int max_tokens = 2000;
 
     std::string host = config.environment + std::string(".plaid.com");
     std::string host_header = "Host: " + host;
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request_body = json::Object();
+    JSON request_body = json::Object();
     request_body["client_id"] = config.client_id;
     request_body["secret"] = config.secret;
     request_body["access_token"] = config.access_token;
     // If we're matching a specific account
     if (account_id != "")
     {
-        json::JSON options = json::Object();
+        JSON options = json::Object();
         options["account_ids"] = json::Array(account_id);
         request_body["options"] = options;
     }
@@ -494,7 +446,6 @@ std::string plaid_get_account_holder_name(HTTPSClient &client,
     if (!response.is_valid())
     {
         opt.output_length = 2 * opt.output_length;
-        max_tokens = 2 * max_tokens;
         response = client.post("/identity/get", headers, request_body_str.c_str(), opt);
     }
     if (!response.is_valid())
@@ -505,15 +456,24 @@ std::string plaid_get_account_holder_name(HTTPSClient &client,
         THROW_ERROR_CODE(error_code);
     }
 
-    std::map<std::string, jsmntype_t> keys = {{"accounts->owners->names", JSMN_ARRAY},
-                                              {"accounts->account_id", JSMN_STRING}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
-    if (!parser.is_valid())
-        THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body");
-
-    std::vector<std::string> names = data.get_all("accounts->owners->names");
-    std::vector<std::string> account_ids = data.get_all("accounts->account_id");
+    JSON data = JSON::Load(response.get_body());
+    std::vector<std::string> names;
+    int n_accounts = data["accounts"].length();
+    for (int i = 0; i < n_accounts; i++)
+    {
+        int n_owners = data["accounts"][i]["owners"].length();
+        for (int j = 0; j < n_owners; j++)
+        {
+            int n_names = data["accounts"][i]["owners"][j]["names"].length();
+            for (int k = 0; k < n_names; k++)
+            {
+                bool is_string = false;
+                std::string name = data["accounts"][i]["owners"][j]["names"][k].ToString(is_string);
+                if (is_string)
+                    names.push_back(name);
+            }
+        }
+    }
     if (names.size() == 0)
         THROW_EXCEPTION(kJSONParseError,
                         "Could not obtain the account holder name from the JSON body");
@@ -540,7 +500,7 @@ std::string plaid_get_institution_name(HTTPSClient &client, const PlaidConfigura
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request_body = json::Object();
+    JSON request_body = json::Object();
     request_body["client_id"] = config.client_id;
     request_body["secret"] = config.secret;
     request_body["access_token"] = config.access_token;
@@ -557,16 +517,13 @@ std::string plaid_get_institution_name(HTTPSClient &client, const PlaidConfigura
     }
 
     // Parse the response to get the balances of all associated accounts
-    int max_tokens = 500;
-    std::map<std::string, jsmntype_t> keys = {{"item->institution_id", JSMN_STRING}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
-    if (!parser.is_valid())
-        THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body");
+    JSON data = JSON::Load(response.get_body());
+    bool is_string = false;
+    std::string institution_id = data["item"]["institution_id"].ToString(is_string);
+    if (!is_string)
+        THROW_EXCEPTION(kJSONParseError, "Could not parse institution id from JSON body");
 
-    std::string institution_id = data.get("item->institution_id");
-
-    json::JSON name_request_body = json::Object();
+    JSON name_request_body = json::Object();
     name_request_body["client_id"] = config.client_id;
     name_request_body["secret"] = config.secret;
     name_request_body["institution_id"] = institution_id;
@@ -585,13 +542,10 @@ std::string plaid_get_institution_name(HTTPSClient &client, const PlaidConfigura
     }
 
     // Parse the response to get the balances of all associated accounts
-    std::map<std::string, jsmntype_t> name_keys = {{"institution->name", JSMN_STRING}};
-    JSONParser name_parser(name_response.get_body(), max_tokens);
-    JSONData name_data = name_parser.get_data_from_keys(name_keys);
-    if (!name_parser.is_valid())
-        THROW_EXCEPTION(kJSONParseError, "Could not parse JSON body");
-
-    std::string institution_name = name_data.get("institution->name");
+    JSON name_data = JSON::Load(name_response.get_body());
+    std::string institution_name = name_data["institution"]["name"].ToString(is_string);
+    if (!is_string)
+        THROW_EXCEPTION(kJSONParseError, "Could not parse institution name from JSON body");
 
     return institution_name;
 }
@@ -608,7 +562,7 @@ std::vector<PlaidAccount> plaid_get_account_details(HTTPSClient &client,
     std::string content_header = "Content-Type: application/json";
     std::vector<char *> headers = {(char *)host_header.c_str(), (char *)content_header.c_str()};
 
-    json::JSON request_body = json::Object();
+    JSON request_body = json::Object();
     request_body["client_id"] = config.client_id;
     request_body["secret"] = config.secret;
     request_body["access_token"] = config.access_token;
@@ -632,38 +586,32 @@ std::vector<PlaidAccount> plaid_get_account_details(HTTPSClient &client,
     }
 
     // Parse the response to get the account details of all associated accounts
-    std::map<std::string, jsmntype_t> keys = {{"numbers->bacs->account", JSMN_STRING},
-                                              {"numbers->bacs->sort_code", JSMN_STRING},
-                                              {"numbers->bacs->account_id", JSMN_STRING},
-                                              {"numbers->international->iban", JSMN_STRING},
-                                              {"numbers->international->account_id", JSMN_STRING}};
-    JSONParser parser(response.get_body(), max_tokens);
-    JSONData data = parser.get_data_from_keys(keys);
-    if (!parser.is_valid())
-        WARNING_LOG("Not all account fields found");
+    JSON data = JSON::Load(response.get_body());
+    int n_bacs = data["numbers"]["bacs"].length();
+    int n_international = data["numbers"]["international"].length();
 
     // Create objects containing account details
     std::vector<std::string> account_numbers;
     std::vector<std::string> sort_codes;
     std::vector<std::string> bacs_ids;
-    try
+    for (int i = 0; i < n_bacs; i++)
     {
-        account_numbers = data.get_all("numbers->bacs->account");
-        sort_codes = data.get_all("numbers->bacs->sort_code");
-        bacs_ids = data.get_all("numbers->bacs->account_id");
+        account_numbers.push_back(data["numbers"]["bacs"][i]["account"].ToString());
+        sort_codes.push_back(data["numbers"]["bacs"][i]["sort_code"].ToString());
+        bacs_ids.push_back(data["numbers"]["bacs"][i]["account_id"].ToString());
     }
-    catch (const EnclaveException &e)
+    if (n_bacs == 0)
     {
         WARNING_LOG("No BACS bank number information present");
     }
     std::vector<std::string> ibans;
     std::vector<std::string> international_ids;
-    try
+    for (int i = 0; i < n_international; i++)
     {
-        ibans = data.get_all("numbers->international->iban");
-        international_ids = data.get_all("numbers->international->account_id");
+        ibans.push_back(data["numbers"]["international"][i]["iban"].ToString());
+        international_ids.push_back(data["numbers"]["international"][i]["account_id"].ToString());
     }
-    catch (const EnclaveException &e)
+    if (n_international == 0)
     {
         WARNING_LOG("No international bank number information present");
     }

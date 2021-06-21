@@ -8,9 +8,8 @@
 #include "enclave/client/https_response.hpp"
 #include "enclave/common/enclave_exception.hpp"
 #include "enclave/common/enclave_logger.hpp"
+#include "enclave/common/json.hpp"
 #include "enclave/core_status_codes.h"
-#include "enclave/json/json_data.hpp"
-#include "enclave/json/json_parser.hpp"
 
 namespace silentdata
 {

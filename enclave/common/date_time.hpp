@@ -34,6 +34,9 @@ int tm_to_timestamp(const struct tm &date);
 // Calculate the difference between two struct tm's in days
 int tm_day_difference(const struct tm &date1, const struct tm &date2);
 
+// Convert date string from Plaid data to struct tm
+struct tm plaid_date_to_tm(const std::string &date_str);
+
 // Calculate the difference between two struct tm's in floor(months)
 int tm_month_difference(const struct tm &date1, const struct tm &date2);
 

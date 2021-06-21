@@ -15,10 +15,8 @@
 #include "enclave/client/https_response.hpp"
 #include "enclave/common/enclave_exception.hpp"
 #include "enclave/common/enclave_logger.hpp"
+#include "enclave/common/json.hpp"
 #include "enclave/core_status_codes.h"
-#include "enclave/json/json.hpp"
-#include "enclave/json/json_data.hpp"
-#include "enclave/json/json_parser.hpp"
 #include "enclave/plaid/plaid_errors.hpp"
 
 namespace silentdata
@@ -39,6 +37,14 @@ struct PlaidConfiguration
     std::string client_id;
     std::string secret;
     std::string access_token;
+
+    PlaidConfiguration() {}
+    PlaidConfiguration(const std::string &e, const std::string &c, const std::string &s)
+    {
+        environment = e;
+        client_id = c;
+        secret = s;
+    }
 };
 
 struct PlaidAccess
@@ -82,7 +88,7 @@ plaid_get_access(HTTPSClient &client, const PlaidConfiguration &config, const ch
 access_token_status plaid_destroy_access(HTTPSClient &client, const PlaidConfiguration &config);
 
 // Send a request to the Plaid API to return the total bank balance for all connected accounts
-float plaid_get_total_balance(HTTPSClient &client, const PlaidConfiguration &config);
+double plaid_get_total_balance(HTTPSClient &client, const PlaidConfiguration &config);
 
 // Send a request to the Plaid API to return all transactions as amount-date pairs in a given time
 // period

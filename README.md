@@ -1,7 +1,5 @@
-Copyright (c) 2021 Applied Blockchain
-
 # silentdata-enclave
-SGX enclave used in SILENTDATA
+SGX enclave
 
 ## Reproducible build
 - Make sure Docker is installed and working on your machine

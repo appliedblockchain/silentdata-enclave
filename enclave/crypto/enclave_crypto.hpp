@@ -44,9 +44,6 @@ void rsa_sign(const RSAParams &signature_rsa_params,
               std::vector<uint8_t> data,
               sgx_rsa3072_signature_t &signature);
 
-// Generate a SGX library elliptic curve public key from data
-sgx_ec256_public_t ecc_public_key(uint8_t *bytes);
-
 // Perform an elliptic-curve Diffie-Hellman key exchange and derive a key usable for AES encryption
 void ecdh(const sgx_ec256_private_t *local_private_key,
           const uint8_t *peer_public_key_bytes,
