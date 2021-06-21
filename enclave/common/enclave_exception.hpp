@@ -12,13 +12,13 @@ namespace silentdata
 namespace enclave
 {
 
-struct core_status_info
+struct CoreStatusInfo
 {
     std::string name;
     std::string message;
 };
 
-const std::map<core_status_code, core_status_info> core_status_map = {
+const std::map<CoreStatusCode, CoreStatusInfo> core_status_map = {
     {kSuccess, {"Success", "Success!"}},
     {kInvalidInput, {"InvalidInput", "The input to the enclave is not valid"}},
     {kInvalidNonce, {"InvalidNonce", "The plaintext nonce does not match the decrypted input"}},
@@ -149,7 +149,7 @@ const std::map<core_status_code, core_status_info> core_status_map = {
     {kJSONRPCInvalidParams, {"JSONRPCInvalidParams", "Invalid method parameters"}},
     {kJSONRPCInternalError, {"JSONRPCInternalError", "Internal JSON-RPC error"}}};
 
-inline std::string core_status_message(core_status_code status)
+inline std::string core_status_message(CoreStatusCode status)
 {
     std::string message = "(MissingErrorCode-" + std::to_string(static_cast<int>(status)) + ")";
     if (core_status_map.find(status) != core_status_map.end())
@@ -161,7 +161,7 @@ inline std::string core_status_message(core_status_code status)
     return message;
 }
 
-inline std::string core_status_name(core_status_code status)
+inline std::string core_status_name(CoreStatusCode status)
 {
     std::string name = "MissingErrorCode";
     if (core_status_map.find(status) != core_status_map.end())
@@ -174,14 +174,11 @@ inline std::string core_status_name(core_status_code status)
 class EnclaveException : public std::runtime_error
 {
     std::string message_;
-    core_status_code code_;
+    CoreStatusCode code_;
 
 public:
-    EnclaveException(core_status_code code,
-                     const std::string &info,
-                     const char *file,
-                     const char *func,
-                     int line)
+    EnclaveException(
+        CoreStatusCode code, const std::string &info, const char *file, const char *func, int line)
         : std::runtime_error(info), code_(code)
     {
         const char *file_name = strrchr(file, '/');
@@ -194,7 +191,7 @@ public:
                    std::to_string(static_cast<int>(code)) + ") " + std::string(info);
     }
 
-    EnclaveException(core_status_code code, const char *file, const char *func, int line)
+    EnclaveException(CoreStatusCode code, const char *file, const char *func, int line)
         : std::runtime_error(""), code_(code)
     {
         const char *file_name = strrchr(file, '/');
@@ -208,8 +205,8 @@ public:
 
     const char *what() const throw() { return message_.c_str(); }
 
-    core_status_code get_code() const { return code_; }
-    void set_code(core_status_code code) { code_ = code; }
+    CoreStatusCode get_code() const { return code_; }
+    void set_code(CoreStatusCode code) { code_ = code; }
 };
 #define THROW_EXCEPTION(code, arg) throw EnclaveException(code, arg, __FILE__, __func__, __LINE__);
 #define THROW_ERROR_CODE(code) throw EnclaveException(code, __FILE__, __func__, __LINE__);

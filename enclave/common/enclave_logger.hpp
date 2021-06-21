@@ -6,7 +6,7 @@
 
 #include "mbedtls/ssl.h"
 
-enum enclave_log_level
+enum EnclaveLogLevel
 {
     kEnclaveLogLevelNone = 0,
     kEnclaveLogLevelCritical = 1,

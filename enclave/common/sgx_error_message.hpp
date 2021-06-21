@@ -8,14 +8,14 @@
 
 #include "enclave/core_status_codes.h"
 
-struct sgx_status_info
+struct SGXStatusInfo
 {
-    core_status_code core_status;
+    CoreStatusCode core_status;
     std::string name;
     std::string message;
 };
 
-const std::map<sgx_status_t, sgx_status_info> sgx_status_map = {
+const std::map<sgx_status_t, SGXStatusInfo> sgx_status_map = {
     {SGX_ERROR_UNEXPECTED, {kSGXError, "SGX_ERROR_UNEXPECTED", "Unexpected error occurred."}},
     {SGX_ERROR_INVALID_PARAMETER,
      {kSGXInvalidParameter, "SGX_ERROR_INVALID_PARAMETER", "Invalid parameter."}},
@@ -213,7 +213,7 @@ const std::map<sgx_status_t, sgx_status_info> sgx_status_map = {
 
 std::string sgx_error_message(const std::string &method, const sgx_status_t &status);
 
-inline core_status_code sgx_error_status(const sgx_status_t &status)
+inline CoreStatusCode sgx_error_status(const sgx_status_t &status)
 {
     if (sgx_status_map.find(status) != sgx_status_map.end())
     {

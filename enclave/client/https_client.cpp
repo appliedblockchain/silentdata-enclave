@@ -59,7 +59,7 @@ namespace enclave
 {
 
 // Constructor
-HTTPSClient::HTTPSClient(const char *server,
+HTTPSClient::HTTPSClient(const std::string &server,
                          const ClientOptions &opt,
                          const std::vector<std::string> &certificates)
     : server_(server), opt_(opt)
@@ -73,6 +73,26 @@ HTTPSClient::HTTPSClient(const char *server,
     mbedtls_initialised_ = false;
     for (const auto &cert : certificates)
         pinned_certificates_ += cert;
+
+    // Make sure memory references of MBED TLS objects are valid.
+    mbedtls_init();
+
+    // Set the debugging information level if MBEDTLS debugging available
+#if defined(MBEDTLS_DEBUG_C)
+    mbedtls_debug_set_threshold(opt_.debug_level);
+#endif
+}
+
+// Constructor
+HTTPSClient::HTTPSClient()
+{
+    request_body_ = NULL;
+    length_ = 0;
+    output_ = NULL;
+    session_saved_ = false;
+    session_closed_ = true;
+    initial_setup_ = false;
+    mbedtls_initialised_ = false;
 
     // Make sure memory references of MBED TLS objects are valid.
     mbedtls_init();
@@ -97,12 +117,13 @@ HTTPSClient::~HTTPSClient()
 }
 
 // Send a GET request and parse the response
-HTTPSResponse
-HTTPSClient::get(const char *endpoint, const std::vector<char *> &headers, ClientOptions opt)
+HTTPSResponse HTTPSClient::get(const std::string &endpoint,
+                               const std::vector<std::string> &headers,
+                               ClientOptions opt)
 {
     unsigned char output[opt.output_length];
     opt.request_type = GET_REQUEST_TYPE;
-    opt.request_page = endpoint;
+    opt.request_page = endpoint.c_str();
     const char *body = "";
     try
     {
@@ -126,18 +147,23 @@ HTTPSClient::get(const char *endpoint, const std::vector<char *> &headers, Clien
     return https_response;
 }
 
+HTTPSResponse HTTPSClient::get(const std::string &endpoint, const std::vector<std::string> &headers)
+{
+    return get(endpoint, headers, opt_);
+}
+
 // Send a POST request and parse the response
-HTTPSResponse HTTPSClient::post(const char *endpoint,
-                                const std::vector<char *> &headers,
-                                const char *body,
+HTTPSResponse HTTPSClient::post(const std::string &endpoint,
+                                const std::vector<std::string> &headers,
+                                const std::string &body,
                                 ClientOptions opt)
 {
     unsigned char output[opt.output_length];
     opt.request_type = POST_REQUEST_TYPE;
-    opt.request_page = endpoint;
+    opt.request_page = endpoint.c_str();
     try
     {
-        configure_and_send(opt, headers, body, output);
+        configure_and_send(opt, headers, body.c_str(), output);
     }
     catch (const EnclaveException &e)
     {
@@ -155,6 +181,20 @@ HTTPSResponse HTTPSClient::post(const char *endpoint,
     // Return the response and certificate_chain from the server
     HTTPSResponse https_response(parse_result.response, certificate_chain_str_, parse_valid);
     return https_response;
+}
+
+HTTPSResponse HTTPSClient::post(const std::string &endpoint,
+                                const std::vector<std::string> &headers,
+                                const std::string &body)
+{
+    return post(endpoint, headers, body, opt_);
+}
+
+void HTTPSClient::set_certificates(const std::vector<std::string> &certificates)
+{
+    pinned_certificates_.clear();
+    for (const auto &cert : certificates)
+        pinned_certificates_ += cert;
 }
 
 // Initialise mbedtls objects
@@ -190,7 +230,7 @@ void HTTPSClient::mbedtls_free()
 
 // Reset the member variables so a new request can be made
 void HTTPSClient::configure_and_send(const ClientOptions &opt,
-                                     const std::vector<char *> &headers,
+                                     const std::vector<std::string> &headers,
                                      const char *request_body,
                                      unsigned char *output)
 {
@@ -297,7 +337,7 @@ void HTTPSClient::load_certificates()
 void HTTPSClient::start_connection()
 {
     if (opt_.server_addr == NULL)
-        opt_.server_addr = server_;
+        opt_.server_addr = server_.c_str();
 
     INFO_LOG("Connecting to %s:%s:%s...",
              opt_.transport == MBEDTLS_SSL_TRANSPORT_STREAM ? "TCP" : "UDP",
@@ -375,7 +415,7 @@ void HTTPSClient::configure_ssl()
 
     // Set or reset the hostname to check against the received server
     // certificate
-    if ((ret = mbedtls_ssl_set_hostname(&ssl_, server_)) != 0)
+    if ((ret = mbedtls_ssl_set_hostname(&ssl_, opt_.server_addr)) != 0)
     {
         print_mbedtls_error("mbedtls_ssl_set_hostname", ret);
         THROW_EXCEPTION(kClientConfigurationError, "Checking server hostname failed");
@@ -480,8 +520,8 @@ void HTTPSClient::send_request()
 
     for (size_t i = 0; i < headers_.size(); i++)
     {
-        len +=
-            mbedtls_snprintf((char *)buffer + len, sizeof(buffer) - 1 - len, "%s\r\n", headers_[i]);
+        len += mbedtls_snprintf(
+            (char *)buffer + len, sizeof(buffer) - 1 - len, "%s\r\n", headers_[i].c_str());
     }
 
     // Add body to request if there is one (assumes only POST requests have bodies)

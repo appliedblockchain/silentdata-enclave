@@ -17,7 +17,7 @@ namespace enclave
 {
 
 // Obtain the plaid error from the response and convert it to the corresponding core status code
-core_status_code parse_plaid_error(HTTPSResponse response);
+CoreStatusCode parse_plaid_error(HTTPSResponse response);
 
 } // namespace enclave
 } // namespace silentdata

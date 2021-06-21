@@ -206,5 +206,32 @@ int tm_month_difference(const struct tm &date1, const struct tm &date2)
     return (date2.tm_year - date1.tm_year) * 12 + date2.tm_mon - date1.tm_mon;
 }
 
+struct tm get_earliest_date(const std::vector<BankTransaction> &transactions)
+{
+    if (transactions.size() < 1)
+        THROW_EXCEPTION(kJSONParseError, "No transactions available");
+    struct tm first_date = transactions[0].date;
+    for (const auto &transaction : transactions)
+    {
+        struct tm date = transaction.date;
+        if (date.tm_year < first_date.tm_year)
+        {
+            first_date = date;
+        }
+        else if (date.tm_year == first_date.tm_year)
+        {
+            if (date.tm_mon < first_date.tm_mon)
+            {
+                first_date = date;
+            }
+            else if (date.tm_mon == first_date.tm_mon && date.tm_mday < first_date.tm_mday)
+            {
+                first_date = date;
+            }
+        }
+    }
+    return first_date;
+}
+
 } // namespace enclave
 } // namespace silentdata

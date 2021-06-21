@@ -1,22 +1,14 @@
 #ifndef SILENTDATA_ENCLAVE_CORE_STATUS_CODES_H
 #define SILENTDATA_ENCLAVE_CORE_STATUS_CODES_H
 
-enum access_token_status
-{
-    kAccessTokenNotCreated,
-    kAccessTokenCreated,
-    kAccessTokenNotDestroyed,
-    kAccessTokenDestroyed
-};
-
-enum auth_support
+enum AuthSupport
 {
     kAuthBACSAndIBANSupported = 1,
     kAuthBACSNotSupported = 2,
     kAuthIBANNotSupported = 3
 };
 
-enum core_status_code
+enum CoreStatusCode
 {
     kSuccess = 0,
     kInvalidInput = 1,

@@ -1,4 +1,4 @@
-#include "enclave/plaid/plaid_comparison_functions.hpp"
+#include "enclave/proofs/comparison_functions.hpp"
 
 namespace
 {
@@ -6,14 +6,14 @@ namespace
 using namespace silentdata::enclave;
 
 // Match transactions by same name and day of the month
-int find_matching_transaction(const PlaidTransaction &transaction,
-                              const std::vector<PlaidTransaction> &other_transactions,
+int find_matching_transaction(const BankTransaction &transaction,
+                              const std::vector<BankTransaction> &other_transactions,
                               int tolerance)
 {
     int matched_index = -1;
     for (size_t i = 0; i < other_transactions.size(); i++)
     {
-        PlaidTransaction other_transaction = other_transactions[i];
+        BankTransaction other_transaction = other_transactions[i];
         // Must be from the same source
         if (other_transaction.name != transaction.name)
             continue;
@@ -34,7 +34,7 @@ int find_matching_transaction(const PlaidTransaction &transaction,
 
 // Check monthly income against a total over a range of months, index of income should be the number
 // of months from the first checked month
-bool check_income(const std::map<int, double> &income, int32_t consistent_income, int num_months)
+bool check_income(const std::map<int, double> &income, uint32_t consistent_income, int num_months)
 {
     // Do the attestation
     int months_checked = 0;
@@ -67,10 +67,28 @@ namespace silentdata
 namespace enclave
 {
 
-bool plaid_check_income(const std::vector<PlaidTransaction> &transactions,
-                        const struct tm &start_date,
-                        const struct tm &end_date,
-                        int32_t consistent_income)
+bool check_minimum_balance(const BankBalance &balance,
+                           const std::string &currency_code,
+                           uint32_t minimum_balance)
+{
+    if (balance.currency_code != currency_code)
+    {
+        WARNING_LOG("Balance in unexpected currency code: %s", balance.currency_code.c_str());
+        return false;
+    }
+    if (balance.available < static_cast<double>(minimum_balance))
+    {
+        WARNING_LOG("Minimum account balance requirements not met");
+        return false;
+    }
+    return true;
+}
+
+bool check_consistent_income(const std::vector<BankTransaction> &transactions,
+                             const struct tm &start_date,
+                             const struct tm &end_date,
+                             const std::string &currency_code,
+                             uint32_t consistent_income)
 {
     int num_months = tm_month_difference(start_date, end_date);
     DEBUG_LOG("Start date = %i-%i-%i", start_date.tm_year, start_date.tm_mon, start_date.tm_mday);
@@ -87,6 +105,13 @@ bool plaid_check_income(const std::vector<PlaidTransaction> &transactions,
         // Ignore outgoing (negative) transactions for now
         if (transaction.amount < 0)
             continue;
+        // Ignore any transactions in a different currency
+        if (transaction.currency_code != currency_code)
+        {
+            WARNING_LOG("Unexpected transaction currency code: %s",
+                        transaction.currency_code.c_str());
+            continue;
+        }
         int index = tm_month_difference(start_date, transaction.date);
         // Ignore anything outside of the date range we're considering
         if (income.find(index) == income.end())
@@ -97,10 +122,11 @@ bool plaid_check_income(const std::vector<PlaidTransaction> &transactions,
     return check_income(income, consistent_income, num_months);
 }
 
-bool plaid_check_stable_income(const std::vector<PlaidTransaction> &transactions,
-                               const struct tm &start_date,
-                               const struct tm &end_date,
-                               int32_t consistent_income)
+bool check_stable_income(const std::vector<BankTransaction> &transactions,
+                         const struct tm &start_date,
+                         const struct tm &end_date,
+                         const std::string &currency_code,
+                         uint32_t consistent_income)
 {
     int num_months = tm_month_difference(start_date, end_date);
     DEBUG_LOG("Start date = %i-%i-%i", start_date.tm_year, start_date.tm_mon, start_date.tm_mday);
@@ -108,12 +134,19 @@ bool plaid_check_stable_income(const std::vector<PlaidTransaction> &transactions
     DEBUG_LOG("Month range = %i", num_months);
 
     // Create map of incoming transactions by month
-    std::map<int, std::vector<PlaidTransaction>> month_transactions_map;
+    std::map<int, std::vector<BankTransaction>> month_transactions_map;
     for (const auto &transaction : transactions)
     {
         // Ignore outgoing (negative) transactions for now
         if (transaction.amount < 0)
             continue;
+        // Ignore any transactions in a different currency
+        if (transaction.currency_code != currency_code)
+        {
+            WARNING_LOG("Unexpected transaction currency code: %s",
+                        transaction.currency_code.c_str());
+            continue;
+        }
         int index = tm_month_difference(start_date, transaction.date);
         month_transactions_map[index].push_back(transaction);
     }
@@ -128,17 +161,17 @@ bool plaid_check_stable_income(const std::vector<PlaidTransaction> &transactions
 
     // For each transaction in the first month, check there is a corresponding transaction in all
     // subsequent months before adding to the total income
-    std::vector<PlaidTransaction> first_month_transactions = month_transactions_map[0];
+    std::vector<BankTransaction> first_month_transactions = month_transactions_map[0];
     for (const auto &transaction : first_month_transactions)
     {
-        std::vector<PlaidTransaction> stable_transactions = {transaction};
+        std::vector<BankTransaction> stable_transactions = {transaction};
         bool is_stable = true;
         // Check there is a transaction from the same entity at around the same time each month
         for (const auto &kv : month_transactions_map)
         {
             if (kv.first == 0)
                 continue;
-            std::vector<PlaidTransaction> other_transactions = kv.second;
+            std::vector<BankTransaction> other_transactions = kv.second;
             int matched_index = find_matching_transaction(transaction, other_transactions, 3);
             if (matched_index < 0 || matched_index >= static_cast<int>(other_transactions.size()))
             {
@@ -162,12 +195,12 @@ bool plaid_check_stable_income(const std::vector<PlaidTransaction> &transactions
     return check_income(income, consistent_income, num_months);
 }
 
-PlaidAccountMatchResult plaid_match_account(const std::vector<PlaidAccount> &account_details,
-                                            uint32_t account_number,
-                                            uint32_t sort_code,
-                                            const std::string &iban)
+AccountMatchResult match_account(const std::vector<AccountDetails> &account_details,
+                                 uint32_t account_number,
+                                 uint32_t sort_code,
+                                 const std::string &iban)
 {
-    auth_support supported_bank_info;
+    AuthSupport supported_bank_info;
     for (const auto &account : account_details)
     {
         // Check which numbers are supported by this institution
@@ -194,7 +227,7 @@ PlaidAccountMatchResult plaid_match_account(const std::vector<PlaidAccount> &acc
             if (account_number == account.account_number && sort_code == account.sort_code)
             {
                 DEBUG_LOG("Account has the required number and sort code");
-                return PlaidAccountMatchResult(account.account_id, supported_bank_info);
+                return AccountMatchResult(account.account_id, supported_bank_info);
             }
         }
         // Match just IBAN if account number and sort code not provided
@@ -209,7 +242,7 @@ PlaidAccountMatchResult plaid_match_account(const std::vector<PlaidAccount> &acc
             if (iban == account.iban)
             {
                 DEBUG_LOG("Account has the required IBAN");
-                return PlaidAccountMatchResult(account.account_id, supported_bank_info);
+                return AccountMatchResult(account.account_id, supported_bank_info);
             }
         }
         // Match all three
@@ -223,7 +256,7 @@ PlaidAccountMatchResult plaid_match_account(const std::vector<PlaidAccount> &acc
                 if (iban == account.iban)
                 {
                     DEBUG_LOG("Account has a matching IBAN");
-                    return PlaidAccountMatchResult(account.account_id, supported_bank_info);
+                    return AccountMatchResult(account.account_id, supported_bank_info);
                 }
             }
             else if (account.iban == "")
@@ -233,7 +266,7 @@ PlaidAccountMatchResult plaid_match_account(const std::vector<PlaidAccount> &acc
                 if (account_number == account.account_number && sort_code == account.sort_code)
                 {
                     DEBUG_LOG("Account has a matching account number and sort code");
-                    return PlaidAccountMatchResult(account.account_id, supported_bank_info);
+                    return AccountMatchResult(account.account_id, supported_bank_info);
                 }
             }
             DEBUG_LOG("Trying to match all three of account number, sort code and IBAN");
@@ -241,7 +274,7 @@ PlaidAccountMatchResult plaid_match_account(const std::vector<PlaidAccount> &acc
                 iban == account.iban)
             {
                 DEBUG_LOG("Account has the required number, sort code and IBAN");
-                return PlaidAccountMatchResult(account.account_id, supported_bank_info);
+                return AccountMatchResult(account.account_id, supported_bank_info);
             }
         }
         DEBUG_LOG("Not a match");

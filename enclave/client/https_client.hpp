@@ -94,31 +94,49 @@ public:
     HTTPSClient &operator=(HTTPSClient &&) = delete;
 
     // Constructor
-    explicit HTTPSClient(const char *server,
+    explicit HTTPSClient(const std::string &server,
                          const ClientOptions &opt,
                          const std::vector<std::string> &certificates);
     // Destructor
     ~HTTPSClient();
 
     // Send a GET request and parse the response
-    HTTPSResponse get(const char *endpoint, const std::vector<char *> &headers, ClientOptions opt);
+    HTTPSResponse
+    get(const std::string &endpoint, const std::vector<std::string> &headers, ClientOptions opt);
+    HTTPSResponse get(const std::string &endpoint, const std::vector<std::string> &headers);
     // Send a POST request and parse the response
-    HTTPSResponse post(const char *endpoint,
-                       const std::vector<char *> &headers,
-                       const char *body,
+    HTTPSResponse post(const std::string &endpoint,
+                       const std::vector<std::string> &headers,
+                       const std::string &body,
                        ClientOptions opt);
+    HTTPSResponse post(const std::string &endpoint,
+                       const std::vector<std::string> &headers,
+                       const std::string &body);
     // Obtain a copy of the client configuration options
     ClientOptions get_client_options() { return opt_; }
 
+    // Public setters
+    void set_server(const std::string &server) { server_ = server.c_str(); }
+    void set_server_port(const char *port) { opt_.server_port = port; }
+    void set_read_timeout(uint32_t timeout) { opt_.read_timeout = timeout; }
+    void set_certificates(const std::vector<std::string> &certificates);
+    void set_close_session(bool close) { opt_.close_session = close; }
+
 protected:
+    HTTPSClient();
+    void set_options(const ClientOptions &opt) { opt_ = opt; }
+    void set_output_length(int length) { opt_.output_length = length; }
+    int get_output_length() const { return opt_.output_length; }
+
+private:
     // Name of the remote server
-    const char *server_;
+    std::string server_;
     // Configuration options (allowed options in client_opt.h)
     ClientOptions opt_;
     // Pinned leaf certificates that this client will connect to
     std::string pinned_certificates_;
     // HTTP headers
-    std::vector<char *> headers_;
+    std::vector<std::string> headers_;
     // HTTP request body
     const char *request_body_;
     // Output buffer with maximum size
@@ -150,7 +168,7 @@ protected:
     void mbedtls_free();
     // Reset the member variables so a new request can be made
     void configure_and_send(const ClientOptions &opt,
-                            const std::vector<char *> &headers,
+                            const std::vector<std::string> &headers,
                             const char *request_body,
                             unsigned char *output);
     // Call all of the member functions required to run the client

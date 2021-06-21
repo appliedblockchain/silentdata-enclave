@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "enclave/common/enclave_exception.hpp"
+#include "enclave/common/types.hpp"
 
 namespace silentdata
 {
@@ -39,6 +40,9 @@ struct tm plaid_date_to_tm(const std::string &date_str);
 
 // Calculate the difference between two struct tm's in floor(months)
 int tm_month_difference(const struct tm &date1, const struct tm &date2);
+
+// Find the first date in a list of transactions
+struct tm get_earliest_date(const std::vector<BankTransaction> &transactions);
 
 } // namespace enclave
 } // namespace silentdata

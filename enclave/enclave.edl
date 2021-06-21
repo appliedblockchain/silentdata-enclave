@@ -4,145 +4,159 @@ enclave {
     from "mbedtls_SGX.edl" import *;
     from "sgx_tstdc.edl" import sgx_oc_cpuidex;
 
-    struct plaid_minimum_balance_attestation_data {
+    struct MinimumBalanceProofData {
+        char version[6];
         char nonce[16];
         char timestamp[64];
         char account_holder_name[128];
         char institution_name[128];
-        int32_t minimum_balance;
+        uint32_t minimum_balance;
     };
 
-    struct plaid_minimum_balance_contract_attestation_data {
+    struct MinimumBalanceContractProofData {
+        char version[6];
         char nonce[16];
         char timestamp[64];
         char wallet_signature[65];
-        int32_t minimum_balance;
+        uint32_t minimum_balance;
     };
 
-    struct plaid_consistent_income_attestation_data {
+    struct ConsistentIncomeProofData {
+        char version[6];
         char nonce[16];
         char timestamp[64];
         char account_holder_name[128];
         char institution_name[128];
-        int32_t consistent_income;
+        uint32_t consistent_income;
     };
 
-    struct plaid_consistent_income_contract_attestation_data {
+    struct ConsistentIncomeContractProofData {
+        char version[6];
         char nonce[16];
         char timestamp[64];
         char wallet_signature[65];
-        int32_t consistent_income;
+        uint32_t consistent_income;
     };
 
-    struct plaid_account_ownership_attestation_data {
+    struct AccountOwnershipProofData {
+        char version[6];
         char nonce[16];
         char timestamp[64];
         char account_holder_name[128];
         char institution_name[128];
-        int32_t account_number;
-        int32_t sort_code;
+        uint32_t account_number;
+        uint32_t sort_code;
         char iban[35];
-        enum auth_support supported_bank_info;
+        enum AuthSupport supported_bank_info;
     };
 
     trusted {
 
-        public enum core_status_code plaid_get_link_token(
+        public enum CoreStatusCode get_keys(
+            [out, size=384] uint8_t* sig_modulus,
+            [out, size=64] uint8_t* enc_public_key);
+
+        public enum CoreStatusCode get_report(
+            [in] sgx_target_info_t *p_qe_target,
+            [out] sgx_report_t *p_report);
+
+        public enum CoreStatusCode plaid_get_link_token(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* client_user_id,
+            [in, string] const char* country,
             [in, string] const char* redirect_uri,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             int32_t client_timestamp,
             [in, size=29] uint8_t* encrypted_input,
-            [out, size=336] uint8_t* enc_data);
+            [out, size=336] uint8_t* encrypted_output);
 
-        public enum core_status_code plaid_minimum_balance_attestation(
+        public enum CoreStatusCode plaid_minimum_balance_proof(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             [in, size=16] uint8_t* nonce,
-            int32_t minimum_balance,
+            [in, string] const char* currency_code,
+            uint32_t minimum_balance,
             int32_t client_timestamp,
             [in, size=84] uint8_t* encrypted_input,
-            [out] struct plaid_minimum_balance_attestation_data* attestation,
+            [out] struct MinimumBalanceProofData* proof_data,
             [out, size=10000] char* certificate_chain,
-            [out, size=384] uint8_t* signature,
-            [out] enum access_token_status* access_status);
+            [out, size=384] uint8_t* signature);
 
-        public enum core_status_code plaid_minimum_balance_contract_attestation(
+        public enum CoreStatusCode plaid_minimum_balance_contract_proof(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             [in, size=16] uint8_t* nonce,
-            int32_t minimum_balance,
+            [in, string] const char* currency_code,
+            uint32_t minimum_balance,
             int32_t client_timestamp,
             [in, size=149] uint8_t* encrypted_input,
-            [out] struct plaid_minimum_balance_contract_attestation_data* attestation,
+            [out] struct MinimumBalanceContractProofData* proof_data,
             [out, size=10000] char* certificate_chain,
-            [out, size=384] uint8_t* signature,
-            [out] enum access_token_status* access_status);
+            [out, size=384] uint8_t* signature);
 
-        public enum core_status_code plaid_consistent_income_attestation(
+        public enum CoreStatusCode plaid_consistent_income_proof(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             [in, size=16] uint8_t* nonce,
-            int32_t consistent_income,
+            [in, string] const char* currency_code,
+            uint32_t consistent_income,
             int32_t client_timestamp,
             [in, size=84] uint8_t* encrypted_input,
-            [out] struct plaid_consistent_income_attestation_data* attestation,
+            [out] struct ConsistentIncomeProofData* proof_data,
             [out, size=10000] char* certificate_chain,
-            [out, size=384] uint8_t* signature,
-            [out] enum access_token_status* access_status);
+            [out, size=384] uint8_t* signature);
 
-        public enum core_status_code plaid_stable_income_attestation(
+        public enum CoreStatusCode plaid_stable_income_proof(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             [in, size=16] uint8_t* nonce,
-            int32_t consistent_income,
+            [in, string] const char* currency_code,
+            uint32_t consistent_income,
             int32_t client_timestamp,
             [in, size=84] uint8_t* encrypted_input,
-            [out] struct plaid_consistent_income_attestation_data* attestation,
+            [out] struct ConsistentIncomeProofData* proof_data,
             [out, size=10000] char* certificate_chain,
-            [out, size=384] uint8_t* signature,
-            [out] enum access_token_status* access_status);
+            [out, size=384] uint8_t* signature);
 
-        public enum core_status_code plaid_consistent_income_contract_attestation(
+        public enum CoreStatusCode plaid_consistent_income_contract_proof(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             [in, size=16] uint8_t* nonce,
-            int32_t consistent_income,
+            [in, string] const char* currency_code,
+            uint32_t consistent_income,
             int32_t client_timestamp,
             [in, size=149] uint8_t* encrypted_input,
-            [out] struct plaid_consistent_income_contract_attestation_data* attestation,
+            [out] struct ConsistentIncomeContractProofData* proof_data,
             [out, size=10000] char* certificate_chain,
-            [out, size=384] uint8_t* signature,
-            [out] enum access_token_status* access_status);
+            [out, size=384] uint8_t* signature);
 
-        public enum core_status_code plaid_stable_income_contract_attestation(
+        public enum CoreStatusCode plaid_stable_income_contract_proof(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
             [in, size=64] uint8_t* client_public_key,
             [in, size=16] uint8_t* nonce,
-            int32_t consistent_income,
+            [in, string] const char* currency_code,
+            uint32_t consistent_income,
             int32_t client_timestamp,
             [in, size=149] uint8_t* encrypted_input,
-            [out] struct plaid_consistent_income_contract_attestation_data* attestation,
+            [out] struct ConsistentIncomeContractProofData* proof_data,
             [out, size=10000] char* certificate_chain,
-            [out, size=384] uint8_t* signature,
-            [out] enum access_token_status* access_status);
+            [out, size=384] uint8_t* signature);
 
-        public enum core_status_code plaid_account_ownership_attestation(
+        public enum CoreStatusCode plaid_account_ownership_proof(
             [in, string] const char* client_id,
             [in, string] const char* secret,
             [in, string] const char* plaid_environment,
@@ -153,18 +167,10 @@ enclave {
             [in, string] const char* iban,
             int32_t client_timestamp,
             [in, size=84] uint8_t* encrypted_input,
-            [out] struct plaid_account_ownership_attestation_data* attestation,
+            [out] struct AccountOwnershipProofData* proof_data,
             [out, size=10000] char* certificate_chain,
-            [out, size=384] uint8_t* signature,
-            [out] enum access_token_status* access_status);
+            [out, size=384] uint8_t* signature);
 
-        public enum core_status_code get_keys(
-            [out, size=384] uint8_t* sig_modulus,
-            [out, size=64] uint8_t* enc_public_key);
-
-        public enum core_status_code get_report(
-            [in] sgx_target_info_t *p_qe_target,
-            [out] sgx_report_t *p_report);
     };
 
 };

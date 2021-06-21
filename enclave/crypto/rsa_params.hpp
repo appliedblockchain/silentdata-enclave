@@ -4,6 +4,7 @@
 #include "sgx_tcrypto.h"
 
 #include "enclave/common/enclave_exception.hpp"
+#include "enclave/common/sgx_error_message.hpp"
 
 namespace silentdata
 {

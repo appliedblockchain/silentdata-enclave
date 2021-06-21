@@ -3,7 +3,7 @@
 // 1. Plaid: (sandbox.plaid.com, development.plaid.com) (Expires Aug 5 2022)
 // 2. Plaid: (production.plaid.com) (Expires Jun 23 2022)
 
-#define plaid_certificate \
+#define plaid_dev_certificate \
 "-----BEGIN CERTIFICATE-----\r\n"\
 "MIIHlDCCBnygAwIBAgIQC7+ssUSKfkQiWea5yTfytjANBgkqhkiG9w0BAQsFADB1\r\n"\
 "MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\r\n"\
@@ -47,7 +47,9 @@
 "nleW63ZPqnq1TxvqTxWP/8Owpo30qbp3NX8SRVjhzJ8ZLawZu89kzstrseWulAsI\r\n"\
 "v9mQGmIZ4lztXeJX49tcbj7JRcyTVgym\r\n"\
 "-----END CERTIFICATE-----\r\n"\
-"\r\n"\
+"\r\n"
+
+#define plaid_certificate \
 "-----BEGIN CERTIFICATE-----\r\n"\
 "MIIHbjCCBlagAwIBAgIQCRik5JYN9VbkUal36bXzPjANBgkqhkiG9w0BAQsFADB1\r\n"\
 "MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\r\n"\

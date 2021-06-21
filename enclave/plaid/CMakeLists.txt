@@ -1,7 +1,5 @@
 # Plaid library
-set(E_PLAID_SRCS plaid_attestation.cpp
-                 plaid_comparison_functions.cpp
-                 plaid_requests.cpp
+set(E_PLAID_SRCS plaid_client.cpp
                  plaid_errors.cpp)
 
 add_trusted_library(enclave_plaid_t

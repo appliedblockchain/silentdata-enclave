@@ -5,7 +5,7 @@ namespace silentdata
 namespace enclave
 {
 
-core_status_code parse_plaid_error(HTTPSResponse response)
+CoreStatusCode parse_plaid_error(HTTPSResponse response)
 {
     // Just in case a valid response was passed to the function
     if (response.get_status_code() == 200)

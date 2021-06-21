@@ -4,13 +4,15 @@ add_subdirectory(common)
 add_subdirectory(crypto)
 add_subdirectory(client)
 add_subdirectory(plaid)
+add_subdirectory(proofs)
 
 set(E_SRCS enclave.cpp)
 
 set(ENCLAVE_TRUSTED_LIBS enclave_common_t
                          enclave_crypto_t
                          enclave_client_t
-                         enclave_plaid_t)
+                         enclave_plaid_t
+                         enclave_proofs_t)
 
 set(ENCLAVE_LIB_PATHS ${MBEDTLS_LIB_PATH})
 
